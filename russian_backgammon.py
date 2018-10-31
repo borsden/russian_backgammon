@@ -145,18 +145,24 @@ class Board:
                 print(' '.join(r))
 
     @contextmanager
-    def reverse(self, fake: bool = False) -> 'Board':
-        """Context manager To reverse board. If fake, then we don't reverse it.
+    def viewpoint(self, checker_type: Checker) -> 'Board':
+        """Context manager for turning a board, so head of passed checker_type will be at 0 position.
 
-        :param fake: if True, that we don't what really reverse board.
+        :param checker_type: if True, that we don't what really reverse board.
         """
-        if fake:
+        if checker_type == self.CHECKER_TYPES[0]:
             yield self
         else:
-            half_len = self.half_cols_len
-            self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
-            yield self
-            self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
+            with self.reverse():
+                yield self
+
+    @contextmanager
+    def reverse(self) -> 'Board':
+        """Context manager to turn board and return after."""
+        half_len = self.half_cols_len
+        self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
+        yield self
+        self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
 
     def move(self, *moves: Move) -> None:
         """Move checkers.
@@ -248,7 +254,7 @@ class Board:
 
         opponents_positions = self.get_occupied_positions(opponent_checker_type)
 
-        return any(opponent_home[0] >= pos > opponent_home[1] for pos in opponents_positions)
+        return any(opponent_home[0] <= pos < opponent_home[1] for pos in opponents_positions)
 
     def check_move_available(self, *moves: Move) -> bool:
         """Check, that moves are available."""
@@ -272,7 +278,7 @@ class Board:
          It means, that we have 15 checkers for each type of checkers (except situations, when all checkers are in home).
         """
         for checker_type in self.CHECKER_TYPES:
-            with self.reverse(fake=(checker_type == self.CHECKER_TYPES[0])):
+            with self.viewpoint(checker_type):
                 if not self.can_withdraw(checker_type):
                     positions = self.get_occupied_positions(checker_type)
                     total_checkers = sum(len(self.cols[pos]) for pos in positions)
@@ -325,13 +331,10 @@ class Game:
         """
         dice = self.roll_dice()
 
-        # We don't want reverse board for first player
-        fake_reverse = player == self.players[0]
+        if self.logs:
+            self.board.draw()
 
-        with self.board.reverse(fake=fake_reverse):
-
-            if self.logs:
-                self.board.draw()
+        with self.board.viewpoint(player.checker_type):
 
             available_moves = self.get_available_moves(dice, player.checker_type)
 
@@ -343,8 +346,6 @@ class Game:
                 self.board.move(*moves)
 
                 self.print('Move:', moves)
-                if self.logs:
-                    self.board.draw()
 
     def was_finished(self, player: Player) -> bool:
         """If there are no checkers on board, then player was finished."""

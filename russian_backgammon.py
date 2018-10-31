@@ -421,13 +421,13 @@ class Game:
             _moves = set(itertools.chain(*_moves))
             available_moves = {moves for moves in _moves if self.board.check_move_available(*moves)}
 
-            # In the first step we can get two checker from the head if it is double dice
-            if is_double and first_move:
-                die = dice[0]
-                if self.board.check_position_available(checkers_type, 0 + die):
-                    available_moves.add(((0, die), (0, die)))
-
             if available_moves:
+                # In the first step we can get two checker from the head if it is double dice
+                if is_double and first_move:
+                    die = dice[0]
+                    if self.board.check_position_available(checkers_type, 0 + die):
+                        available_moves.add(((0, die), (0, die)))
+
                 return available_moves
 
         return set()

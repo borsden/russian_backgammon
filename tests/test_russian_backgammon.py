@@ -32,6 +32,17 @@ def get_board(x_columns: Columns = {}, y_columns: Columns = {}) -> bg.Board:
 @pytest.mark.parametrize(['columns', 'dice', 'expected_moves'], [
     (
         (
+            {0: 15, },
+            {0: 15, },
+        ),
+        (3, 3),
+        {
+            ((0, 3), (3, 3), (6, 3)),
+            ((0, 3), (0, 3))
+        }
+    ),
+    (
+        (
             {0: 10, 4: 2, 5: 1, 6: 2},
             {0: 12, 13: 1, 14: 1, 15: 1},
         ),

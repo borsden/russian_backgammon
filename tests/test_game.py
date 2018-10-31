@@ -1,11 +1,8 @@
 from typing import Dict
 
 import pytest
-import russian_backgammon as bg
+import backgammon.game as bg
 
-#
-# xChecker = bg.xChecker
-# oChecker = bg.oChecker
 
 Columns = Dict[int, int]
 
@@ -30,6 +27,17 @@ def get_board(x_columns: Columns = {}, y_columns: Columns = {}) -> bg.Board:
 
 
 @pytest.mark.parametrize(['columns', 'dice', 'expected_moves'], [
+    (
+        (
+            {22: 11, },
+            {23: 5, 22: 4},
+        ),
+        (3, 6),
+        {
+            ((22, 6), (22, 3)),
+            ((22, 3), (22, 6))
+        }
+    ),
     (
         (
             {0: 15, },
@@ -167,8 +175,7 @@ def get_board(x_columns: Columns = {}, y_columns: Columns = {}) -> bg.Board:
 def test_available_moves(columns, dice, expected_moves):
     board = get_board(*columns)
 
-    game = bg.Game(players=[bg.Player(), bg.Player()])
+    game = bg.Game(players=[bg.Agent(), bg.Agent()])
     game.board = board
-    available_moves = game.get_available_moves(dice, bg.xChecker)
-
+    available_moves = game.get_available_moves(dice)
     assert available_moves == set(expected_moves)

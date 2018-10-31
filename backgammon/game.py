@@ -10,21 +10,18 @@ class MoveError(Exception):
     pass
 
 
-class Player:
+class Agent:
     """Player."""
     checker_type: 'Checker'
     """Checker type for this player."""
 
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
+
     @abc.abstractmethod
     def get_action(self, available_moves: Set['Moves'], game: 'Game') -> 'Moves':
         """Strategy of player."""
-
-
-class RandomPlayer(Player):
-    """Random Player."""
-
-    def get_action(self, available_moves: Set['Moves'], game: 'Game') -> 'Moves':
-        return random.choice(list(available_moves))
 
 
 class Checker(NamedTuple):
@@ -57,7 +54,7 @@ class Board:
     """Number of columns."""
     NUM_CHECKERS = 15
     """Number of checkers for one player."""
-    CHECKER_TYPES = (xChecker, oChecker)
+    CHECKER_TYPES = [xChecker, oChecker]
 
     def __init__(self) -> None:
         self.cols = [[] for _ in range(self.NUM_COLS)]
@@ -67,23 +64,33 @@ class Board:
         self.cols[self.half_cols_len] = [self.CHECKER_TYPES[1] for _ in range(self.NUM_CHECKERS)]
         """Add checkers at the heads."""
 
-    def get_occupied_positions(self, checker_type: Checker) -> Iterator[int]:
-        """Get positions occupied by this checker type.
+    @property
+    def current_checker(self):
+        """Current checker."""
+        return self.CHECKER_TYPES[0]
 
-        :param checker_type: checker type
+    @property
+    def opponent_checker(self):
+        """Opponent checker."""
+        return self.CHECKER_TYPES[1]
+
+    def get_occupied_positions(self, opponent: bool = False) -> Iterator[int]:
+        """Get positions occupied by current checker type with counts of .
+
+        :param opponent: find occupied positions for opponent
         """
+        checker_type = self.opponent_checker if opponent else self.current_checker
         return (index for index, col in enumerate(self.cols) if col and col[0] == checker_type)
 
-    def check_position_available(self, checker_type: Checker, position: int) -> bool:
+    def check_position_available(self, position: int) -> bool:
         """Check, that this position is available for this checker type.
         Also available positions out of board. It means checker withdrawal.
 
-        :param checker_type: checker type
         :param position: position
         """
         if position < len(self.cols):
             col = self.cols[position]
-            return not col or col[0] == checker_type
+            return not col or col[0] == self.current_checker
         else:
             return True
 
@@ -150,7 +157,7 @@ class Board:
 
         :param checker_type: if True, that we don't what really reverse board.
         """
-        if checker_type == self.CHECKER_TYPES[0]:
+        if checker_type == self.current_checker:
             yield self
         else:
             with self.reverse():
@@ -159,10 +166,14 @@ class Board:
     @contextmanager
     def reverse(self) -> 'Board':
         """Context manager to turn board and return after."""
+        def _reverse():
+            self.CHECKER_TYPES[0], self.CHECKER_TYPES[1] = self.CHECKER_TYPES[1], self.CHECKER_TYPES[0]
+            self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
+
         half_len = self.half_cols_len
-        self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
+        _reverse()
         yield self
-        self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
+        _reverse()
 
     def move(self, *moves: Move) -> None:
         """Move checkers.
@@ -188,7 +199,7 @@ class Board:
                 if not self.can_withdraw(_checker):
                     raise MoveError('Tried to withdraw checker when not all checkers in the home.')
                 if to_pos != len(self.cols):
-                    prev_positions = [pos for pos in self.get_occupied_positions(_checker) if pos < from_pos]
+                    prev_positions = [pos for pos in self.get_occupied_positions() if pos < from_pos]
                     if prev_positions:
                         raise MoveError('Previous checkers can be withdraw.')
 
@@ -206,9 +217,9 @@ class Board:
             raise MoveError('Must be at least one move in args.')
 
         for move in moves:
-            checker_type = _move(move)
+            _move(move)
 
-        if not self.can_make_blocks(checker_type) and self.has_block(checker_type):
+        if not self.can_make_blocks() and self.has_block():
             _rollback(*moves)
             raise MoveError('Block is unavailable while opponent has not at least one checker in home.')
 
@@ -224,7 +235,7 @@ class Board:
         finally:
             self.cols = cols
 
-    def has_block(self, checker_type: Checker, block_size: int = 6) -> bool:
+    def has_block(self, block_size: int = 6) -> bool:
         """Check if there are any blocks (6 checkers in row). """
 
         def possible_blocks(iterable: Iterator[Any]) -> Iterator[Any]:
@@ -237,22 +248,17 @@ class Board:
 
         return any(
             (block[-1] - block[0]) == (block_size - 1)
-            for block in possible_blocks(self.get_occupied_positions(checker_type))
+            for block in possible_blocks(self.get_occupied_positions())
         )
 
-    def can_make_blocks(self, checker_type: Checker) -> bool:
+    def can_make_blocks(self) -> bool:
         """Check that blocks is available.
 
         If opponent has at least one checker in his home, than available.
         """
-        opponent_checker_type = [
-            _checker_type
-            for _checker_type in self.CHECKER_TYPES
-            if _checker_type != checker_type
-        ][0]
         opponent_home = (self.NUM_COLS // 4, self.NUM_COLS // 2)
 
-        opponents_positions = self.get_occupied_positions(opponent_checker_type)
+        opponents_positions = self.get_occupied_positions(opponent=True)
 
         return any(opponent_home[0] <= pos < opponent_home[1] for pos in opponents_positions)
 
@@ -271,7 +277,7 @@ class Board:
     def can_withdraw(self, checker_type: Checker) -> bool:
         """Check, that all checkers are in home."""
         home_pos = 3 * self.NUM_COLS // 4
-        return not any(pos < home_pos for pos in self.get_occupied_positions(checker_type) )
+        return not any(pos < home_pos for pos in self.get_occupied_positions() )
 
     def check_correct(self):
         """Simple check that board is correct.
@@ -280,7 +286,7 @@ class Board:
         for checker_type in self.CHECKER_TYPES:
             with self.viewpoint(checker_type):
                 if not self.can_withdraw(checker_type):
-                    positions = self.get_occupied_positions(checker_type)
+                    positions = self.get_occupied_positions()
                     total_checkers = sum(len(self.cols[pos]) for pos in positions)
                     if total_checkers != self.NUM_CHECKERS:
                         return False
@@ -290,7 +296,7 @@ class Board:
 class Game:
     """Game. """
 
-    def __init__(self, players: List[Player], logs: bool = False) -> None:
+    def __init__(self, players: List[Agent], logs: bool = False) -> None:
         self.logs = logs
 
         self.board = Board()
@@ -301,16 +307,14 @@ class Game:
         for player, checker_type in zip(self.players, self.board.CHECKER_TYPES):
             player.checker_type = checker_type
 
-    def play(self) -> Player:
+    def play(self) -> Agent:
         """Play game. Return winner after end."""
         players_steps = itertools.cycle(self.players if random.randint(0, 1) else reversed(self.players))
         """Random select, which player start game. """
 
-        while True:
+        while not self.was_finished:
             current_player = next(players_steps)
             self.make_step(player=current_player)
-            if self.was_finished(current_player):
-                break
         return current_player
 
     @property
@@ -324,7 +328,7 @@ class Game:
         if self.logs:
             print(values)
 
-    def make_step(self, player: Player) -> None:
+    def make_step(self, player: Agent) -> None:
         """Roll dice, get available moves for them and get action from player.
 
         :param player: current Player.
@@ -336,7 +340,7 @@ class Game:
 
         with self.board.viewpoint(player.checker_type):
 
-            available_moves = self.get_available_moves(dice, player.checker_type)
+            available_moves = self.get_available_moves(dice)
 
             self.print('Dice:', dice)
             self.print('Available moves:', available_moves)
@@ -347,19 +351,19 @@ class Game:
 
                 self.print('Move:', moves)
 
-    def was_finished(self, player: Player) -> bool:
+    @property
+    def was_finished(self) -> bool:
         """If there are no checkers on board, then player was finished."""
-        return not list(self.board.get_occupied_positions(player.checker_type))
+        return not list(self.board.get_occupied_positions())
 
     def roll_dice(self) -> Dice:
         """Roll dice and return their values."""
         return random.randint(1, 6), random.randint(1, 6)
 
-    def get_available_moves(self, dice: Dice, checkers_type: Checker) -> Set[Moves]:
+    def get_available_moves(self, dice: Dice) -> Set[Moves]:
         """Return available moves for current player with that dices.
 
         :param dice: dice
-        :param checkers_type: current Player checkers type
         """
 
         def _flatten(seq):
@@ -386,7 +390,7 @@ class Game:
                 for die in _dice:
                     new_pos = pos + die
 
-                    if self.board.check_position_available(checkers_type, new_pos):
+                    if self.board.check_position_available(new_pos):
                         new_dice = list(_dice)
                         new_dice.remove(die)
 
@@ -399,7 +403,7 @@ class Game:
                         else:
                             yield ((pos, die),)
 
-        positions = list(self.board.get_occupied_positions(checkers_type))
+        positions = list(self.board.get_occupied_positions())
         is_double = (dice[0] == dice[1])
 
         # Simple check, that all checkers are on the head (First move). In this case we can get two checkers from head.
@@ -425,18 +429,10 @@ class Game:
                 # In the first step we can get two checker from the head if it is double dice
                 if is_double and first_move:
                     die = dice[0]
-                    if self.board.check_position_available(checkers_type, 0 + die):
+                    if self.board.check_position_available(0 + die):
                         available_moves.add(((0, die), (0, die)))
 
                 return available_moves
 
         return set()
-
-
-if __name__ == '__main__':
-    # board = Board()
-    players = [RandomPlayer(), RandomPlayer()]
-    game = Game(players=players, logs=True)
-    game.play()
-
 

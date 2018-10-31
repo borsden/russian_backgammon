@@ -1,0 +1,14 @@
+version: '2.3'
+
+services:
+  gammon:
+    build: .
+    runtime: nvidia
+    ports:
+      - 8888:8888
+      - 6006:6006
+    tty: true
+    stdin_open: true
+#    command: bash
+#    volumes:
+#      - ./gammon:/gammon

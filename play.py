@@ -43,7 +43,7 @@ if __name__ == '__main__':
     sess = tf.Session(graph=graph)
     with sess.as_default():
         with graph.as_default():
-            model = Model(sess, model_path, summary_path, checkpoint_path)
+            model = Model(sess, model_path, summary_path, checkpoint_path, restore=False)
 
             if ACTION == 'train':
                 model.train()

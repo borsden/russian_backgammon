@@ -241,24 +241,21 @@ class Model:
         # the agent plays against itself, making the best move for each player
         players = [TfAgent(self), TfAgent(self)]
 
-        validation_interval = 1000
+        validation_interval = 250
         episodes = 5000
 
         for episode in range(1, episodes + 1):
             if episode % validation_interval == 0:
-                self.test(episodes=100)
+                self.test(episodes=25)
 
             game = Game(players=players)
 
-            x = self.extract_features(game)
-
             game_step = 0
 
-            players_steps = itertools.cycle(game.players if random.randint(0, 1) else reversed(game.players))
-            """Random select, which player start game. """
+            x = self.extract_features(game)
 
-            while not game.was_finished:
-                current_player = next(players_steps)
+            while not game.board.was_finished():
+                current_player = next(game.players_steps)
                 game.make_step(player=current_player)
 
                 x_next = self.extract_features(game)

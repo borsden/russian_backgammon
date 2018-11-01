@@ -3,7 +3,7 @@ import copy
 import itertools
 import random
 from contextlib import contextmanager
-from typing import List, Tuple, NamedTuple, Sequence, Set, Iterator, Any
+from typing import List, Tuple, NamedTuple, Sequence, Set, Iterator, Any, Optional
 
 
 class MoveError(Exception):
@@ -93,6 +93,13 @@ class Board:
             return not col or col[0] == self.current_checker
         else:
             return True
+
+    def was_finished(self):
+        """Game was finished if one of players does not have checkers on board."""
+        return not (
+            any(True for _ in self.get_occupied_positions()) and
+            any(True for _ in self.get_occupied_positions(opponent=True))
+        )
 
     @property
     def half_cols_len(self):
@@ -184,7 +191,6 @@ class Board:
             """Move one checker from position with step."""
             from_pos, die = move
             to_pos = from_pos + die
-
             if not self.cols[from_pos]:
                 raise MoveError('`From` position is empty.')
 
@@ -296,8 +302,19 @@ class Board:
 class Game:
     """Game. """
 
-    def __init__(self, players: List[Agent], logs: bool = False) -> None:
-        self.logs = logs
+    def __init__(self, players: List[Agent], show_logs: bool = False, who_start: Optional[int] = None) -> None:
+        """
+
+        :param players: agents, who play this game
+        :param show_logs: do we want logout
+        :param who_start: manual set starting player
+        """
+        self.show_logs = show_logs
+        self._store = dict(
+            dice=[],
+            moves=[],
+            who_start=0
+        )
 
         self.board = Board()
         """Board."""
@@ -307,14 +324,20 @@ class Game:
         for player, checker_type in zip(self.players, self.board.CHECKER_TYPES):
             player.checker_type = checker_type
 
+        who_start = random.randint(0, 1) if who_start is None else who_start
+        self._store['who_start'] = who_start
+
+        self.players_steps = itertools.cycle(self.players if who_start else reversed(self.players))
+        """Infinitive iterator for order of player steps. Starting player is random."""
+
     def play(self) -> Agent:
         """Play game. Return winner after end."""
-        players_steps = itertools.cycle(self.players if random.randint(0, 1) else reversed(self.players))
-        """Random select, which player start game. """
 
-        while not self.was_finished:
-            current_player = next(players_steps)
+
+        while not self.board.was_finished():
+            current_player = next(self.players_steps)
             self.make_step(player=current_player)
+
         return current_player
 
     @property
@@ -325,7 +348,7 @@ class Game:
 
     def print(self, *values: Any) -> None:
         """Print value if logs flag is enabled."""
-        if self.logs:
+        if self.show_logs:
             print(values)
 
     def make_step(self, player: Agent) -> None:
@@ -334,10 +357,11 @@ class Game:
         :param player: current Player.
         """
         dice = self.roll_dice()
+        self._store['dice'].append(dice)
 
-        if self.logs:
+
+        if self.show_logs:
             self.board.draw()
-
         with self.board.viewpoint(player.checker_type):
 
             available_moves = self.get_available_moves(dice)
@@ -347,14 +371,10 @@ class Game:
 
             if available_moves:
                 moves = player.get_action(available_moves, self)
+                self._store['moves'].append(moves)
                 self.board.move(*moves)
 
                 self.print('Move:', moves)
-
-    @property
-    def was_finished(self) -> bool:
-        """If there are no checkers on board, then player was finished."""
-        return not list(self.board.get_occupied_positions())
 
     def roll_dice(self) -> Dice:
         """Roll dice and return their values."""
@@ -366,14 +386,6 @@ class Game:
         :param dice: dice
         """
 
-        def _flatten(seq):
-            """Flat sequence, if it has subsequiences."""
-            for el in seq:
-                if any(isinstance(sub_el, Sequence) for sub_el in el):
-                    yield from _flatten(el)
-                else:
-                    yield el
-
         def _get_moves(_dice: Sequence[int], from_positions: Set[int]) -> Set[Moves]:
             """Find all available moves.
             Iterate for every available position and every die in dice.
@@ -383,25 +395,26 @@ class Game:
 
             :param _dice: checking dice
             :param from_positions: available positions for steps
-            :return:
             """
-            #
             for pos in from_positions:
                 for die in _dice:
                     new_pos = pos + die
+                    current_moves = ((pos, die),)
 
                     if self.board.check_position_available(new_pos):
                         new_dice = list(_dice)
                         new_dice.remove(die)
 
-                        new_positions = {*from_positions, new_pos} if new_pos < len(self.board.cols) else from_positions
-
-                        sub_moves = _get_moves(new_dice, new_positions)
                         if new_dice:
-                            _result = itertools.product([(pos, die)], sub_moves)
-                            yield from (tuple(sorted(_flatten(move), key=lambda m: m[0])) for move in _result)
+                            new_positions = {*from_positions, new_pos} if new_pos < len(
+                                self.board.cols) else from_positions
+
+                            yield from (
+                                tuple(sorted(current_moves + sub_move, key=lambda m: m[0]))
+                                for sub_move in _get_moves(new_dice, new_positions)
+                            )
                         else:
-                            yield ((pos, die),)
+                            yield current_moves
 
         positions = list(self.board.get_occupied_positions())
         is_double = (dice[0] == dice[1])
@@ -421,7 +434,6 @@ class Game:
             available_dice_combs = set(itertools.combinations(dice, used_dice_count))
 
             _moves = (set(_get_moves(dice_comb, set(positions))) for dice_comb in available_dice_combs)
-            # _moves = itertools.chain(*_moves)
             _moves = set(itertools.chain(*_moves))
             available_moves = {moves for moves in _moves if self.board.check_move_available(*moves)}
 

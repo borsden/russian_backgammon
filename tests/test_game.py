@@ -1,4 +1,4 @@
-from typing import Dict, Set, Tuple
+from typing import Dict, Set, Tuple, Optional
 
 import pytest
 import backgammon.game as bg
@@ -226,10 +226,93 @@ def get_board(x_columns: Columns = {}, y_columns: Columns = {}) -> bg.Board:
     )
 ])
 def test_available_moves(columns: Tuple[Columns, Columns], dice: bg.Dice, expected_moves: Set[bg.Moves]) -> None:
+    """Test, that counted available moves are equal expected."""
     board = get_board(*columns)
 
     game = bg.Game(players=[bg.Agent(), bg.Agent()])
     game.board = board
     available_moves = game.get_available_moves(dice)
-    # print(available_moves)
     assert available_moves == set(expected_moves)
+
+
+@pytest.mark.parametrize(['columns', 'is_mars', 'is_koks'], [
+    (
+        (
+            {22: 11, },
+            {},
+        ),
+        False,
+        False
+    ),
+    (
+        (
+            {23: 15, },
+            {},
+        ),
+        True,
+        False
+    ),
+    (
+        (
+            {23: 15, },
+            {21: 10},
+        ),
+        False,
+        False
+    ),
+    (
+        (
+            {23: 15, },
+            {},
+        ),
+        True,
+        False
+    ),
+    (
+        (
+            {23: 13, },
+            {},
+        ),
+        False,
+        False
+    ),
+    (
+        (
+            {23: 13, 4: 2},
+            {},
+        ),
+        True,
+        True
+    ),
+    (
+        (
+            {},
+            {23: 13, 4: 2},
+        ),
+        True,
+        True
+    ),
+])
+def test_winner(columns: Columns, is_mars: bool, is_koks: bool) -> None:
+    """Test, that we found correct winner with correct type of win."""
+    board = get_board(*columns)
+    game = bg.Game(players=[bg.Agent(), bg.Agent()])
+
+    game.board = board
+
+    winner = board.get_winner_checker_type()
+
+    was_finished = bool(winner)
+    assert game.board.was_finished() == was_finished
+    if winner:
+        with board.viewpoint(winner):
+            looser = board.opponent_checker
+
+            assert game.board.is_winner(winner)
+            assert not game.board.is_winner(looser)
+
+            assert game.board.made_mars(winner) == is_mars
+            assert not game.board.made_mars(looser)
+
+            assert game.board.made_koks(winner) == is_koks
+            assert not game.board.made_koks(looser)

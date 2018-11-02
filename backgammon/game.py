@@ -74,8 +74,13 @@ class Board:
         """Opponent checker."""
         return self.CHECKER_TYPES[1]
 
+    def get_winner_checker_type(self) -> Checker:
+        """Get winner checker type if exist."""
+        if self.was_finished():
+            return next(checker_type for checker_type in self.CHECKER_TYPES if self.is_winner(checker_type))
+
     def get_occupied_positions(self, opponent: bool = False) -> Iterator[int]:
-        """Get positions occupied by current checker type with counts of .
+        """Get positions occupied by current checker type.
 
         :param opponent: find occupied positions for opponent
         """
@@ -93,13 +98,6 @@ class Board:
             return not col or col[0] == self.current_checker
         else:
             return True
-
-    def was_finished(self):
-        """Game was finished if one of players does not have checkers on board."""
-        return not (
-            any(True for _ in self.get_occupied_positions()) and
-            any(True for _ in self.get_occupied_positions(opponent=True))
-        )
 
     @property
     def half_cols_len(self):
@@ -268,6 +266,51 @@ class Board:
 
         return any(opponent_home[0] <= pos < opponent_home[1] for pos in opponents_positions)
 
+    def was_finished(self) -> bool:
+        """Game was finished if one of players is winner."""
+        return any(
+            self.is_winner(checker_type)
+            for checker_type in self.CHECKER_TYPES
+        )
+
+    def is_winner(self, checker_type: Checker)-> bool:
+        """Check, that current checker_type does not have checkers on board."""
+        with self.viewpoint(checker_type):
+            return not list(self.get_occupied_positions())
+
+    def made_mars(self, checker_type: Checker)-> bool:
+        """Check, that this checker type made mars for opponent.
+
+        (Was finished, but all opponent checker are on board.)
+        """
+        with self.viewpoint(checker_type):
+            opponents_positions = self.get_occupied_positions(opponent=True)
+
+            return (
+                self.is_winner(checker_type) and
+                sum(
+                    len(self.cols[pos])
+                    for pos in opponents_positions
+                ) == self.NUM_CHECKERS
+            )
+
+    def made_koks(self, checker_type: Checker)-> bool:
+        """Check, that this checker type made koks for opponent.
+
+        (Was finished, and one or more checkers of opponent are in first quadrant.)
+        """
+        with self.viewpoint(checker_type):
+            opponents_positions = self.get_occupied_positions(opponent=True)
+            opponent_home = (self.NUM_COLS // 2, 3 * self.NUM_COLS // 4)
+
+            return (
+                self.is_winner(checker_type) and
+                any(
+                    opponent_home[0] <= pos < opponent_home[1]
+                    for pos in opponents_positions
+                )
+            )
+
     def check_move_available(self, *moves: Move) -> bool:
         """Check, that moves are available."""
         try:
@@ -327,12 +370,11 @@ class Game:
         who_start = random.randint(0, 1) if who_start is None else who_start
         self._store['who_start'] = who_start
 
-        self.players_steps = itertools.cycle(self.players if who_start else reversed(self.players))
+        self.players_steps = itertools.cycle(self.players if not who_start else reversed(self.players))
         """Infinitive iterator for order of player steps. Starting player is random."""
 
     def play(self) -> Agent:
         """Play game. Return winner after end."""
-
 
         while not self.board.was_finished():
             current_player = next(self.players_steps)

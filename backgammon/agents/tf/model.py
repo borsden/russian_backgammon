@@ -1,15 +1,17 @@
+from typing import List
+
 import itertools
+import os
+import pathlib
 import time
-import random
-from typing import List, Any
 
 import numpy as np
 import tensorflow as tf
 
-from backgammon.game import Game
 # from backgammon.agents.human_agent import HumanAgent
 from backgammon.agents.random_agent import RandomAgent
 from backgammon.agents.tf_agent import TfAgent
+from backgammon.game import Game
 
 
 # helper to initialize a weight and bias variable
@@ -27,17 +29,26 @@ def dense_layer(x, shape, activation, name):
 
 
 class Model:
-    def __init__(self, sess, model_path, summary_path, checkpoint_path, restore=False):
-        self.model_path = model_path
-        self.summary_path = summary_path
-        self.checkpoint_path = checkpoint_path
+
+    LAYER_SIZE_INPUT = 722
+    LAYER_SIZE_HIDDEN = 100
+
+    def __init__(self, sess: tf.Session, path: str, restore: bool = False) -> None:
+        """Create tensorflow model. Write graph"""
+
+        self.path = path
+        self.checkpoint_path = os.path.join(path, 'checkpoints')
+        self.summaries_path = os.path.join(path, 'summaries')
+
+        pathlib.Path(self.path).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(self.checkpoint_path).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(self.summaries_path).mkdir(parents=True, exist_ok=True)
 
         # setup our session
         self.sess = sess
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
         # lambda decay
-
         lamda = tf.maximum(
             0.7,
             tf.train.exponential_decay(0.9, self.global_step, 30000, 0.96, staircase=True),
@@ -55,8 +66,8 @@ class Model:
         tf.summary.scalar('alpha', alpha)
 
         # describe network size
-        layer_size_input = 722
-        layer_size_hidden = 100
+        layer_size_input = self.LAYER_SIZE_INPUT
+        layer_size_hidden = self.LAYER_SIZE_HIDDEN
         layer_size_output = 1
 
         # placeholders for input and target output
@@ -166,7 +177,7 @@ class Model:
         self.summaries_op = tf.summary.merge_all()
 
         # create a saver for periodic checkpoints
-        self.saver = tf.train.Saver(max_to_keep=1)
+        self.saver = tf.train.Saver(max_to_keep=10)
 
         # run variable initializers
         self.sess.run(tf.global_variables_initializer())
@@ -176,6 +187,7 @@ class Model:
             self.restore()
 
     def restore(self):
+        """Restore latest checkpoint."""
         latest_checkpoint_path = tf.train.latest_checkpoint(self.checkpoint_path)
         if latest_checkpoint_path:
             print(('Restoring checkpoint: {0}'.format(latest_checkpoint_path)))
@@ -189,7 +201,6 @@ class Model:
     #     game = Game.new()
     #     game.play([TDAgent(Game.TOKENS[0], self), HumanAgent(Game.TOKENS[1])], draw=True)
 
-    @classmethod
     def extract_features(self, game: Game) -> List[List[int]]:
         """Create feature to insert in model."""
         def _get_features(opponent: bool=False) -> List[float]:
@@ -233,9 +244,10 @@ class Model:
             ))
 
     def train(self):
-        tf.train.write_graph(self.sess.graph_def, self.model_path, 'td_gammon.pb', as_text=False)
+        tf.train.write_graph(self.sess.graph, self.path, 'model.pb', as_text=False)
         summary_writer = tf.summary.FileWriter(
-            '{0}{1}'.format(self.summary_path, int(time.time()), self.sess.graph_def)
+            os.path.join(self.summaries_path, str(int(time.time()))),
+            self.sess.graph
         )
 
         # the agent plays against itself, making the best move for each player
@@ -244,10 +256,7 @@ class Model:
         validation_interval = 250
         episodes = 5000
 
-        for episode in range(1, episodes + 1):
-            if episode % validation_interval == 0:
-                self.test(episodes=25)
-
+        for episode in range(episodes):
             game = Game(players=players)
 
             game_step = 0
@@ -265,6 +274,13 @@ class Model:
                 x = x_next
                 game_step += 1
 
+            V_next = 1 if current_player == game.players else -1
+
+            if game.board.made_koks(current_player.checker_type):
+                V_next *= 3
+            elif game.board.made_mars(current_player.checker_type):
+                V_next *= 2
+
             V_next = 1 if current_player == game.players[0] else 0
 
             _, global_step, summaries, _ = self.sess.run([
@@ -277,8 +293,38 @@ class Model:
             summary_writer.add_summary(summaries, global_step=global_step)
 
             print(("Game %d/%d (Winner: %s) in %d turns" % (episode, episodes, current_player.checker_type, game_step)))
-            self.saver.save(self.sess, self.checkpoint_path + 'checkpoint', global_step=global_step)
+
+            if (episode + 1) % validation_interval == 0:
+                self.saver.save(self.sess, os.path.join(self.checkpoint_path, 'checkpoint'), global_step=global_step)
+                self.test(episodes=25)
 
         summary_writer.close()
 
         self.test(episodes=1000)
+
+
+class Model2(Model):
+    LAYER_SIZE_INPUT = 50
+    LAYER_SIZE_HIDDEN = 25
+
+    @classmethod
+    def extract_features(self, game: Game) -> List[List[float]]:
+        """Create feature to insert in model."""
+        def _get_features(opponent: bool=False) -> List[float]:
+            positions_with_count = {
+                pos: len(board.cols[pos])
+                for pos in board.get_occupied_positions(opponent)
+            }
+            outed_checkers_percent = sum(positions_with_count.values()) / board.NUM_CHECKERS
+
+            _features = [0 for _ in range(board.NUM_COLS)]
+
+            for pos, count in positions_with_count.items():
+                _features[pos] = count/board.NUM_CHECKERS
+
+            return _features + [outed_checkers_percent]
+
+        board = game.board
+
+        features = _get_features() + _get_features(opponent=True)
+        return np.array(features).reshape(1, -1)

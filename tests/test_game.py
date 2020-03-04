@@ -1,28 +1,8 @@
-from typing import Dict, Set, Tuple, Optional
+from typing import Set, Tuple
 
 import pytest
+
 import backgammon.game as bg
-
-Columns = Dict[int, int]
-
-
-def get_board(x_columns: Columns = {}, y_columns: Columns = {}) -> bg.Board:
-    """Method to create board from passed columns. """
-
-    def fill_board(board: bg.Board, columns: Columns, checker_type: bg.Checker) -> None:
-        for column, number in columns.items():
-            board.cols[column] = [checker_type] * number
-
-    board = bg.Board()
-    board.cols = [[] for _ in range(board.NUM_COLS)]
-
-    fill_board(board, x_columns, bg.xChecker)
-    with board.reverse():
-        fill_board(board, y_columns, bg.oChecker)
-
-    # board.draw()
-    assert board.check_correct(), 'This board is incorrect.'
-    return board
 
 
 @pytest.mark.parametrize(['columns', 'dice', 'expected_moves'], [
@@ -69,7 +49,6 @@ def get_board(x_columns: Columns = {}, y_columns: Columns = {}) -> bg.Board:
             ((5, 6), (11, 3)),
             ((5, 6), (6, 3)),
             ((6, 3), (9, 6))
-
         }
     ),
     (
@@ -225,13 +204,15 @@ def get_board(x_columns: Columns = {}, y_columns: Columns = {}) -> bg.Board:
         ,
     )
 ])
-def test_available_moves(columns: Tuple[Columns, Columns], dice: bg.Dice, expected_moves: Set[bg.Moves]) -> None:
+def test_available_moves(
+        columns: Tuple[bg.ColumnCheckersNumber, bg.ColumnCheckersNumber],
+        dice: bg.Dice,
+        expected_moves: Set[bg.Moves]
+) -> None:
     """Test, that counted available moves are equal expected."""
-    board = get_board(*columns)
+    board = bg.Board.from_schema(*columns)
 
-    game = bg.Game(players=[bg.Agent(), bg.Agent()])
-    game.board = board
-    available_moves = game.get_available_moves(dice)
+    available_moves = board.get_available_moves(dice)
     assert available_moves == set(expected_moves)
 
 
@@ -293,9 +274,9 @@ def test_available_moves(columns: Tuple[Columns, Columns], dice: bg.Dice, expect
         True
     ),
 ])
-def test_winner(columns: Columns, is_mars: bool, is_koks: bool) -> None:
+def test_winner(columns: bg.ColumnCheckersNumber, is_mars: bool, is_koks: bool) -> None:
     """Test, that we found correct winner with correct type of win."""
-    board = get_board(*columns)
+    board = bg.Board.from_schema(*columns)
     game = bg.Game(players=[bg.Agent(), bg.Agent()])
 
     game.board = board

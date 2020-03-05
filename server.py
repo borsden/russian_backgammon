@@ -4,11 +4,22 @@ from typing import Set
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, root_validator
 from pydantic import Field
+from starlette.middleware.cors import CORSMiddleware
 
 import backgammon.game as bg
 from backgammon.agents import random_agent
 
 app = FastAPI(title="Russian backgammon API.")
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class AgentTypes(Enum):
@@ -82,8 +93,10 @@ async def agent_move(agent: Agent, schema: MoveSchema):
         with board.reverse(fake=not schema.reverse) as board:
             dice = bg.roll_dice()
             available_moves = board.get_available_moves(dice)
-            moves = agent.get_action(available_moves, board)
-            board.move(*moves)
+            moves = tuple()
+            if available_moves:
+                moves = agent.get_action(available_moves, board)
+                board.move(*moves)
         columns, opponent_columns = board.to_schema()
         return dict(
             board=dict(columns=columns, opponent_columns=opponent_columns),
@@ -112,3 +125,9 @@ async def roll_dice(schema: MoveSchema):
     except Exception as e:
         print(e)
         raise HTTPException(404, "Specified board is not correct.")
+
+
+@app.get("/available_agents", response_model=Set[str])
+async def available_agents():
+    """Endpoint to receive available agents."""
+    return {i.name for i in AgentTypes}

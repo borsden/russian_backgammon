@@ -1,5 +1,3 @@
-import itertools
-import random
 import time
 from typing import Set
 
@@ -72,20 +70,16 @@ def roll_dice(*args, **kwargs):
 
 
 if __name__ == '__main__':
-    # board = Board()
     t1 = time.time()
     players = [FakeRandomAgent(), FakeRandomAgent()]
     game = bg.Game(players=players, show_logs=False, who_start=store['who_start'])
-    game.roll_dice = roll_dice
-
-    # players = [RandomAgent(), RandomAgent()]
-    # game = bg.Game(players=players, show_logs=False)
+    bg.roll_dice = roll_dice
 
     while not game.board.was_finished():
         current_player = next(game.players_steps)
         game.make_step(player=current_player)
 
-    game.board.draw()
+    game.board.print()
     print(game._store)
     print(current_player.checker_type)
     print(time.time() - t1)

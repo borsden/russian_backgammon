@@ -3,7 +3,7 @@ import copy
 import itertools
 import random
 from contextlib import contextmanager
-from typing import List, Tuple, NamedTuple, Sequence, Set, Iterator, Any, Optional
+from typing import List, Tuple, NamedTuple, Sequence, Set, Iterator, Any, Optional, Dict
 
 
 class MoveError(Exception):
@@ -20,7 +20,7 @@ class Agent:
         return self.__class__.__name__
 
     @abc.abstractmethod
-    def get_action(self, available_moves: Set['Moves'], game: 'Game') -> 'Moves':
+    def get_action(self, available_moves: Set['Moves'], board: 'Board') -> 'Moves':
         """Strategy of player."""
 
 
@@ -32,6 +32,9 @@ class Checker(NamedTuple):
         return self.type
 
 
+ColumnCheckersNumber = Dict[int, int]
+"""Number of column and number of checkers in this column."""
+
 Dice = Tuple[int, int]
 """Roll of the dice."""
 
@@ -41,11 +44,16 @@ Column = List[Checker]
 Move = Tuple[int, int]
 """Move on a board. Include start position and die."""
 
-Moves = Tuple[Move]
+Moves = Tuple[Move, ...]
 """Moves in one step."""
 
 xChecker = Checker(type=' x')
 oChecker = Checker(type=' o')
+
+
+def roll_dice() -> Dice:
+    """Roll dice and return their values."""
+    return random.randint(1, 6), random.randint(1, 6)
 
 
 class Board:
@@ -63,6 +71,52 @@ class Board:
         self.cols[0] = [self.CHECKER_TYPES[0] for _ in range(self.NUM_CHECKERS)]
         self.cols[self.half_cols_len] = [self.CHECKER_TYPES[1] for _ in range(self.NUM_CHECKERS)]
         """Add checkers at the heads."""
+
+    @classmethod
+    def from_schema(
+            cls,
+            x_columns: ColumnCheckersNumber,
+            y_columns: ColumnCheckersNumber,
+            straight: bool = False
+    ) -> 'Board':
+        """Method to create board from passed columns and number of checkers there.
+
+        :param x_columns: checkers in columns for FIRST player
+        :param y_columns: checkers in columns for SECOND player
+        :param straight: Flag, that columns positions for second player started from first player view
+                (0->23, 2->21, ...)
+        """
+
+        def fill_board(board: Board, columns: ColumnCheckersNumber, checker_type: Checker) -> None:
+            for column, number in columns.items():
+                if board.cols[column]:
+                    raise ValueError(f'Columns should not include both types of checkers.')
+                board.cols[column] = [checker_type] * number
+
+        board = cls()
+        board.cols = [[] for _ in range(board.NUM_COLS)]
+
+        fill_board(board, x_columns, xChecker)
+
+        with board.reverse(fake=straight) as board:
+            fill_board(board, y_columns, oChecker)
+
+        board.check_correct()
+        return board
+
+    def to_schema(self, straight: bool = False) -> Tuple[ColumnCheckersNumber, ColumnCheckersNumber]:
+        """Method to receive columns numbers and number of checkers there from existing board
+
+        :param straight: Flag, that columns positions for second player should started from first player view
+                (0->23, 2->21, ...)
+        """
+        positions = self.get_occupied_positions()
+        column_checker = {pos: len(self.cols[pos]) for pos in positions}
+
+        with self.reverse(fake=straight) as board:
+            opponent_positions = board.get_occupied_positions(opponent=straight)
+            opponent_column_checker = {pos: len(board.cols[pos]) for pos in opponent_positions}
+        return column_checker, opponent_column_checker
 
     @property
     def current_checker(self):
@@ -110,7 +164,7 @@ class Board:
         b.cols = copy.deepcopy(self.cols)
         return b
 
-    def draw(self) -> None:
+    def print(self) -> None:
         """Draw current board."""
 
         def half_row() -> List[List[str]]:
@@ -162,29 +216,34 @@ class Board:
 
         :param checker_type: if True, that we don't what really reverse board.
         """
-        if checker_type == self.current_checker:
-            yield self
-        else:
-            with self.reverse():
-                yield self
+        with self.reverse(checker_type == self.current_checker) as board:
+            yield board
 
     @contextmanager
-    def reverse(self) -> 'Board':
-        """Context manager to turn board and return after."""
+    def reverse(self, fake: bool = False) -> 'Board':
+        """Context manager to turn board and return previous view after that.
+
+        :param fake: don't turn board, return as is.
+        """
+
         def _reverse():
+            half_len = self.half_cols_len
             self.CHECKER_TYPES[0], self.CHECKER_TYPES[1] = self.CHECKER_TYPES[1], self.CHECKER_TYPES[0]
             self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
 
-        half_len = self.half_cols_len
-        _reverse()
-        yield self
-        _reverse()
+        if fake:
+            yield self
+        else:
+            _reverse()
+            yield self
+            _reverse()
 
     def move(self, *moves: Move) -> None:
         """Move checkers.
 
         May multiple moves.
         """
+
         def _move(move: Move) -> Checker:
             """Move one checker from position with step."""
             from_pos, die = move
@@ -200,7 +259,7 @@ class Board:
                     raise MoveError('`To` position is already opponent position.')
                 new_col.append(_checker)
             else:
-                if not self.can_withdraw(_checker):
+                if not self.can_withdraw():
                     raise MoveError('Tried to withdraw checker when not all checkers in the home.')
                 if to_pos != len(self.cols):
                     prev_positions = [pos for pos in self.get_occupied_positions() if pos < from_pos]
@@ -273,12 +332,12 @@ class Board:
             for checker_type in self.CHECKER_TYPES
         )
 
-    def is_winner(self, checker_type: Checker)-> bool:
+    def is_winner(self, checker_type: Checker) -> bool:
         """Check, that current checker_type does not have checkers on board."""
         with self.viewpoint(checker_type):
             return not list(self.get_occupied_positions())
 
-    def made_mars(self, checker_type: Checker)-> bool:
+    def made_mars(self, checker_type: Checker) -> bool:
         """Check, that this checker type made mars for opponent.
 
         (Was finished, but all opponent checker are on board.)
@@ -287,14 +346,14 @@ class Board:
             opponents_positions = self.get_occupied_positions(opponent=True)
 
             return (
-                self.is_winner(checker_type) and
-                sum(
-                    len(self.cols[pos])
-                    for pos in opponents_positions
-                ) == self.NUM_CHECKERS
+                    self.is_winner(checker_type) and
+                    sum(
+                        len(self.cols[pos])
+                        for pos in opponents_positions
+                    ) == self.NUM_CHECKERS
             )
 
-    def made_koks(self, checker_type: Checker)-> bool:
+    def made_koks(self, checker_type: Checker) -> bool:
         """Check, that this checker type made koks for opponent.
 
         (Was finished, and one or more checkers of opponent are in first quadrant.)
@@ -304,11 +363,11 @@ class Board:
             opponent_home = (self.NUM_COLS // 2, 3 * self.NUM_COLS // 4)
 
             return (
-                self.is_winner(checker_type) and
-                any(
-                    opponent_home[0] <= pos < opponent_home[1]
-                    for pos in opponents_positions
-                )
+                    self.is_winner(checker_type) and
+                    any(
+                        opponent_home[0] <= pos < opponent_home[1]
+                        for pos in opponents_positions
+                    )
             )
 
     def check_move_available(self, *moves: Move) -> bool:
@@ -323,10 +382,10 @@ class Board:
         except MoveError:
             return False
 
-    def can_withdraw(self, checker_type: Checker) -> bool:
+    def can_withdraw(self) -> bool:
         """Check, that all checkers are in home."""
         home_pos = 3 * self.NUM_COLS // 4
-        return not any(pos < home_pos for pos in self.get_occupied_positions() )
+        return not any(pos < home_pos for pos in self.get_occupied_positions())
 
     def check_correct(self):
         """Simple check that board is correct.
@@ -334,12 +393,80 @@ class Board:
         """
         for checker_type in self.CHECKER_TYPES:
             with self.viewpoint(checker_type):
-                if not self.can_withdraw(checker_type):
+                if not self.can_withdraw():
                     positions = self.get_occupied_positions()
                     total_checkers = sum(len(self.cols[pos]) for pos in positions)
                     if total_checkers != self.NUM_CHECKERS:
-                        return False
-        return True
+                        raise ValueError('Incorrect board. Should heave 15 checkers for each type of checkers.')
+                if not self.can_make_blocks() and self.has_block():
+                    raise ValueError('Can block only if at least one opponent checker is in home.')
+
+    def get_available_moves(self, dice: Dice) -> Set[Moves]:
+        """Return available moves with specified dice.
+
+        :param dice: dice
+        """
+
+        def _get_moves(_dice: Sequence[int], from_positions: Set[int]) -> Set[Moves]:
+            """Find all available moves.
+            Iterate for every available position and every die in dice.
+            If step with this die from this position is available, then we add this position to existing positions
+            and recursive check other positions and dice.
+
+            :param _dice: checking dice
+            :param from_positions: available positions for steps
+            """
+            for pos in from_positions:
+                for die in _dice:
+                    new_pos = pos + die
+                    current_moves = ((pos, die),)
+
+                    if self.check_position_available(new_pos):
+                        new_dice = list(_dice)
+                        new_dice.remove(die)
+
+                        if new_dice:
+                            new_positions = {*from_positions, new_pos} if new_pos < len(
+                                self.cols) else from_positions
+
+                            yield from (
+                                tuple(sorted(current_moves + sub_move, key=lambda m: m[0]))
+                                for sub_move in _get_moves(new_dice, new_positions)
+                            )
+                        else:
+                            yield current_moves
+
+        positions = list(self.get_occupied_positions())
+        is_double = (dice[0] == dice[1])
+
+        # Simple check, that all checkers are on the head (First move). In this case we can get two checkers from head.
+        first_move = len(positions) == 1 and positions[0] == 0
+
+        # If it is double dice, than we can make 4 moves.
+        if is_double:
+            dice = dice * 2
+
+        # We check situations, when we can not make move with full dice. In this cases we find other available moves.
+        # e.x. We have 6:6. See 6:6:6:6 -> 6:6:6 -> 6:6 -> 6
+        # e.x. We have 4:5. See 4:5 -> 4 -> 5
+        for used_dice_count in range(len(dice), 0, -1):
+            # Find all available combinations of dice.
+            available_dice_combs = set(itertools.combinations(dice, used_dice_count))
+
+            _moves = (set(_get_moves(dice_comb, set(positions))) for dice_comb in available_dice_combs)
+            _moves = set(itertools.chain(*_moves))
+            available_moves = {moves for moves in _moves if self.check_move_available(*moves)}
+
+            if available_moves:
+                # In the first step we can get two checker from the head if it is double dice
+                if is_double and first_move:
+                    die = dice[0]
+                    if self.check_position_available(0 + die):
+                        available_moves.add(((0, die), (0, die)))
+
+                return available_moves
+
+        return set()
 
 
 class Game:
@@ -347,7 +474,6 @@ class Game:
 
     def __init__(self, players: List[Agent], show_logs: bool = False, who_start: Optional[int] = None) -> None:
         """
-
         :param players: agents, who play this game
         :param show_logs: do we want logout
         :param who_start: manual set starting player
@@ -375,18 +501,12 @@ class Game:
 
     def play(self) -> Agent:
         """Play game. Return winner after end."""
-
+        current_player = self.board.was_finished()
         while not self.board.was_finished():
             current_player = next(self.players_steps)
             self.make_step(player=current_player)
 
         return current_player
-
-    @property
-    def is_end(self):
-        """Check, that game was end."""
-        # raise NotImplementedError
-        return False
 
     def print(self, *values: Any) -> None:
         """Print value if logs flag is enabled."""
@@ -398,95 +518,24 @@ class Game:
 
         :param player: current Player.
         """
-        dice = self.roll_dice()
+        dice = roll_dice()
         self._store['dice'].append(dice)
 
-
         if self.show_logs:
-            self.board.draw()
+            self.board.print()
         with self.board.viewpoint(player.checker_type):
 
-            available_moves = self.get_available_moves(dice)
+            available_moves = self.board.get_available_moves(dice)
 
             self.print('Dice:', dice)
             self.print('Available moves:', available_moves)
 
             if available_moves:
-                moves = player.get_action(available_moves, self)
+                moves = player.get_action(available_moves, self.board)
                 self._store['moves'].append(moves)
+                self.print('Move:', moves)
+
                 self.board.move(*moves)
 
                 self.print('Move:', moves)
-
-    def roll_dice(self) -> Dice:
-        """Roll dice and return their values."""
-        return random.randint(1, 6), random.randint(1, 6)
-
-    def get_available_moves(self, dice: Dice) -> Set[Moves]:
-        """Return available moves for current player with that dices.
-
-        :param dice: dice
-        """
-
-        def _get_moves(_dice: Sequence[int], from_positions: Set[int]) -> Set[Moves]:
-            """Find all available moves.
-            Iterate for every available position and every die in dice.
-            If step with this die from this position is available, then we add this position to existing positions
-            and recursive check other positions and dice.
-
-
-            :param _dice: checking dice
-            :param from_positions: available positions for steps
-            """
-            for pos in from_positions:
-                for die in _dice:
-                    new_pos = pos + die
-                    current_moves = ((pos, die),)
-
-                    if self.board.check_position_available(new_pos):
-                        new_dice = list(_dice)
-                        new_dice.remove(die)
-
-                        if new_dice:
-                            new_positions = {*from_positions, new_pos} if new_pos < len(
-                                self.board.cols) else from_positions
-
-                            yield from (
-                                tuple(sorted(current_moves + sub_move, key=lambda m: m[0]))
-                                for sub_move in _get_moves(new_dice, new_positions)
-                            )
-                        else:
-                            yield current_moves
-
-        positions = list(self.board.get_occupied_positions())
-        is_double = (dice[0] == dice[1])
-
-        # Simple check, that all checkers are on the head (First move). In this case we can get two checkers from head.
-        first_move = len(positions) == 1 and positions[0] == 0
-
-        # If it is double dice, than we can make 4 moves.
-        if is_double:
-            dice = dice * 2
-
-        # We check situations, when we can not make move with full dice. In this cases we find other available moves.
-        # e.x. We have 6:6. See 6:6:6:6 -> 6:6:6 -> 6:6 -> 6
-        # e.x. We have 4:5. See 4:5 -> 4 -> 5
-        for used_dice_count in range(len(dice), 0, -1):
-            # Find all available combinations of dice.
-            available_dice_combs = set(itertools.combinations(dice, used_dice_count))
-
-            _moves = (set(_get_moves(dice_comb, set(positions))) for dice_comb in available_dice_combs)
-            _moves = set(itertools.chain(*_moves))
-            available_moves = {moves for moves in _moves if self.board.check_move_available(*moves)}
-
-            if available_moves:
-                # In the first step we can get two checker from the head if it is double dice
-                if is_double and first_move:
-                    die = dice[0]
-                    if self.board.check_position_available(0 + die):
-                        available_moves.add(((0, die), (0, die)))
-
-                return available_moves
-
-        return set()
 

@@ -11,7 +11,7 @@ import tensorflow as tf
 # from backgammon.agents.human_agent import HumanAgent
 from backgammon.agents.random_agent import RandomAgent
 from backgammon.agents.tf_agent import TfAgent
-from backgammon.game import Game
+from backgammon.game import Game, Board
 
 
 # helper to initialize a weight and bias variable
@@ -201,7 +201,7 @@ class Model:
     #     game = Game.new()
     #     game.play([TDAgent(Game.TOKENS[0], self), HumanAgent(Game.TOKENS[1])], draw=True)
 
-    def extract_features(self, game: Game) -> List[List[int]]:
+    def extract_features(self, board: Board) -> List[List[int]]:
         """Create feature to insert in model."""
         def _get_features(opponent: bool=False) -> List[float]:
             positions_with_count = {
@@ -217,7 +217,6 @@ class Model:
 
             return list(itertools.chain(*_features)) + [outed_checkers_percent]
 
-        board = game.board
 
         features = _get_features() + _get_features(opponent=True)
         return np.array(features).reshape(1, -1)
@@ -308,7 +307,7 @@ class Model2(Model):
     LAYER_SIZE_HIDDEN = 25
 
     @classmethod
-    def extract_features(self, game: Game) -> List[List[float]]:
+    def extract_features(self, board: Board) -> List[List[float]]:
         """Create feature to insert in model."""
         def _get_features(opponent: bool=False) -> List[float]:
             positions_with_count = {
@@ -324,7 +323,6 @@ class Model2(Model):
 
             return _features + [outed_checkers_percent]
 
-        board = game.board
 
         features = _get_features() + _get_features(opponent=True)
         return np.array(features).reshape(1, -1)

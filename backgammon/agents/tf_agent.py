@@ -9,15 +9,15 @@ class TfAgent(bg.Agent):
     def __init__(self, model: 'Model'):
         self.model = model
 
-    def get_action(self, available_moves: Set[bg.Moves], game: bg.Game) -> bg.Moves:
+    def get_action(self, available_moves: Set[bg.Moves], board: bg.Board) -> bg.Moves:
         """Find and return best action."""
         v_best = 0
         best_moves = None
         # __res = {}
 
         for moves in available_moves:
-            with game.board.temp_move(*moves):
-                features = self.model.extract_features(game)
+            with board.temp_move(*moves):
+                features = self.model.extract_features(board)
                 v = self.model.get_output(features)
                 # __res[moves] = v[0][0]
                 if v > v_best:

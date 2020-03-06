@@ -12,8 +12,6 @@ class MoveError(Exception):
 
 class Agent:
     """Player."""
-    checker_type: 'Checker'
-    """Checker type for this player."""
 
     @property
     def name(self) -> str:
@@ -38,22 +36,24 @@ ColumnCheckersNumber = Dict[int, int]
 Dice = Tuple[int, int]
 """Roll of the dice."""
 
-Column = List[Checker]
-"""Column of a board. May include some checkers."""
-
 Move = Tuple[int, int]
 """Move on a board. Include start position and die."""
 
 Moves = Tuple[Move, ...]
 """Moves in one step."""
 
-xChecker = Checker(type=' x')
-oChecker = Checker(type=' o')
-
 
 def roll_dice() -> Dice:
     """Roll dice and return their values."""
     return random.randint(1, 6), random.randint(1, 6)
+
+
+class Column(NamedTuple):
+    """Column of a board."""
+    is_opp: Optional[bool] = None
+    """Indicate type of checkers in column. True for opponent (opponent by default), False for player."""
+    checkers: int = 0
+    """Number of checkers into column."""
 
 
 class Board:
@@ -62,15 +62,20 @@ class Board:
     """Number of columns."""
     NUM_CHECKERS = 15
     """Number of checkers for one player."""
-    CHECKER_TYPES = [xChecker, oChecker]
 
-    def __init__(self) -> None:
-        self.cols = [[] for _ in range(self.NUM_COLS)]
-        """Columns of a board."""
+    def __init__(self, empty=False) -> None:
+        # Columns of a board.
+        self.columns: Dict[int, Column] = {
+            column: Column() for column in range(self.NUM_COLS)
+        }
 
-        self.cols[0] = [self.CHECKER_TYPES[0] for _ in range(self.NUM_CHECKERS)]
-        self.cols[self.half_cols_len] = [self.CHECKER_TYPES[1] for _ in range(self.NUM_CHECKERS)]
-        """Add checkers at the heads."""
+        if not empty:
+            # Add checkers at the heads.
+            self.columns[0] = Column(False, self.NUM_CHECKERS)
+            self.columns[self.NUM_COLS // 2] = Column(True, self.NUM_CHECKERS)
+
+        # Flag to check, that board is reversed
+        self._is_opp = False
 
     @classmethod
     def from_schema(
@@ -87,19 +92,19 @@ class Board:
                 (0->23, 2->21, ...)
         """
 
-        def fill_board(board: Board, columns: ColumnCheckersNumber, checker_type: Checker) -> None:
-            for column, number in columns.items():
-                if board.cols[column]:
+        def fill_board(board: Board, columns: ColumnCheckersNumber, is_opp: bool) -> None:
+            for pos, checkers in columns.items():
+                if board.columns[pos].checkers:
                     raise ValueError(f'Columns should not include both types of checkers.')
-                board.cols[column] = [checker_type] * number
 
-        board = cls()
-        board.cols = [[] for _ in range(board.NUM_COLS)]
+                board.columns[pos] = Column(is_opp, checkers)
 
-        fill_board(board, x_columns, xChecker)
+        board = cls(empty=True)
+
+        fill_board(board, x_columns, False)
 
         with board.reverse(fake=straight) as board:
-            fill_board(board, y_columns, oChecker)
+            fill_board(board, y_columns, True)
 
         board.check_correct()
         return board
@@ -111,69 +116,111 @@ class Board:
                 (0->23, 2->21, ...)
         """
         positions = self.get_occupied_positions()
-        column_checker = {pos: len(self.cols[pos]) for pos in positions}
+        column_checker = {pos: self.columns[pos].checkers for pos in positions}
 
         with self.reverse(fake=straight) as board:
             opponent_positions = board.get_occupied_positions(opponent=straight)
-            opponent_column_checker = {pos: len(board.cols[pos]) for pos in opponent_positions}
+            opponent_column_checker = {pos: board.columns[pos].checkers for pos in opponent_positions}
         return column_checker, opponent_column_checker
 
-    @property
-    def current_checker(self):
-        """Current checker."""
-        return self.CHECKER_TYPES[0]
+    def is_winner(self, is_opp: bool) -> bool:
+        """Check, that current checker_type does not have checkers on board."""
+        with self.reverse(fake=not is_opp):
+            return not list(self.get_occupied_positions())
+
+    def made_mars(self, is_opp: bool) -> bool:
+        """Check, that this checker type made mars for opponent.
+
+        (Was finished, but all opponent checker are on board.)
+        """
+        with self.reverse(fake=not is_opp):
+            opponents_positions = self.get_occupied_positions(opponent=True)
+
+        return (
+                self.is_winner(is_opp) and
+                sum(
+                    len(self.columns[pos])
+                    for pos in opponents_positions
+                ) == self.NUM_CHECKERS
+        )
+
+    def made_koks(self, is_opp: bool) -> bool:
+        """Check, that this checker type made koks for opponent.
+
+        (Was finished, and one or more checkers of opponent are in first quadrant.)
+        """
+        with self.reverse(fake=not is_opp):
+            opponents_positions = self.get_occupied_positions(opponent=True)
+            opponent_home = (self.NUM_COLS // 2, 3 * self.NUM_COLS // 4)
+
+        return (
+                self.is_winner(is_opp) and
+                any(
+                    opponent_home[0] <= pos < opponent_home[1]
+                    for pos in opponents_positions
+                )
+        )
 
     @property
-    def opponent_checker(self):
-        """Opponent checker."""
-        return self.CHECKER_TYPES[1]
+    def status(self) -> Optional[int]:
+        """Status of a game.
 
-    def get_winner_checker_type(self) -> Checker:
-        """Get winner checker type if exist."""
-        if self.was_finished():
-            return next(checker_type for checker_type in self.CHECKER_TYPES if self.is_winner(checker_type))
+        None, if game is not finished 1/-1 if current player win/lose, 2/-2 for mars, 3/-3 for koks.
+        """
+
+        def _status(is_opp):
+            K = -1 if is_opp else 1
+            with self.reverse(fake=not is_opp):
+                finished = not list(self.get_occupied_positions())
+                # Check, if player don't have any checkers on a board.
+                if finished:
+                    opp_positions = list(self.get_occupied_positions(opponent=True))
+                    # Check, if opponent have all checkers on a board. (MARS)
+                    if sum(self.columns[pos].checkers for pos in opp_positions) == self.NUM_CHECKERS:
+                        opponent_home = (self.NUM_COLS // 2, 3 * self.NUM_COLS // 4)
+                        # Check, if one or more checkers of opponent are in first quadrant.
+                        if any(opponent_home[0] <= pos < opponent_home[1] for pos in opp_positions):
+                            return K * 3
+                        return K * 2
+
+                    return K
+
+        return _status(False) or _status(True)
 
     def get_occupied_positions(self, opponent: bool = False) -> Iterator[int]:
-        """Get positions occupied by current checker type.
+        """Get occupied positions.
 
         :param opponent: find occupied positions for opponent
         """
-        checker_type = self.opponent_checker if opponent else self.current_checker
-        return (index for index, col in enumerate(self.cols) if col and col[0] == checker_type)
+        return (
+            pos for pos, col in self.columns.items()
+            if col.checkers and
+               opponent != (col.is_opp == self._is_opp)
+        )
 
     def check_position_available(self, position: int) -> bool:
-        """Check, that this position is available for this checker type.
+        """Check, that this position is available.
         Also available positions out of board. It means checker withdrawal.
 
         :param position: position
         """
-        if position < len(self.cols):
-            col = self.cols[position]
-            return not col or col[0] == self.current_checker
+        if position < self.NUM_COLS:
+            column = self.columns[position]
+            return not column.checkers or column.is_opp == self._is_opp
         else:
             return True
-
-    @property
-    def half_cols_len(self):
-        """Half of total cols number."""
-        return len(self.cols) // 2
-
-    def copy(self) -> 'Board':
-        """Create new instance of board."""
-        b = Board()
-        b.cols = copy.deepcopy(self.cols)
-        return b
 
     def print(self) -> None:
         """Draw current board."""
 
         def half_row() -> List[List[str]]:
             """Make quadrants of board with current position."""
-            max_length = max((len(col) for col in self.cols[:self.half_cols_len]))
+            max_length = max(self.columns[pos].checkers for pos in range(half_cols_len))
+
             rows = [
                 [
-                    str(column[checker_pos]) if len(column) > checker_pos else '  '
-                    for column in self.cols[:self.half_cols_len]
+                    (' o' if self.columns[pos].is_opp else ' x') if self.columns[pos].checkers > checker_pos else '  '
+                    for pos in range(half_cols_len)
                 ]
                 for checker_pos in range(max_length)
             ]
@@ -181,18 +228,19 @@ class Board:
 
         def col_pos(second_half: bool = False) -> List[str]:
             """Column position. """
-            return [str(n + (self.half_cols_len if second_half else 0)).rjust(2, ' ') for n in
-                    range(self.half_cols_len)]
+            return [str(col + (half_cols_len if second_half else 0)).rjust(2, ' ') for col in range(half_cols_len)]
 
         def horizontal_delimiter():
             """Simple separate positions and checkers."""
-            return ['--' for _ in range(self.half_cols_len)]
+            return ['--' for _ in range(half_cols_len)]
+
+        half_cols_len = self.NUM_COLS // 2
 
         rows = [
             col_pos(),
             horizontal_delimiter(),
             *half_row(),
-            [' _' for _ in range(self.half_cols_len)],
+            [' _' for _ in range(half_cols_len)],
         ]
 
         # reverse second part of board.
@@ -211,15 +259,6 @@ class Board:
                 print(' '.join(r))
 
     @contextmanager
-    def viewpoint(self, checker_type: Checker) -> 'Board':
-        """Context manager for turning a board, so head of passed checker_type will be at 0 position.
-
-        :param checker_type: if True, that we don't what really reverse board.
-        """
-        with self.reverse(checker_type == self.current_checker) as board:
-            yield board
-
-    @contextmanager
     def reverse(self, fake: bool = False) -> 'Board':
         """Context manager to turn board and return previous view after that.
 
@@ -227,10 +266,13 @@ class Board:
         """
 
         def _reverse():
-            half_len = self.half_cols_len
-            self.CHECKER_TYPES[0], self.CHECKER_TYPES[1] = self.CHECKER_TYPES[1], self.CHECKER_TYPES[0]
-            self.cols[half_len:], self.cols[:half_len] = self.cols[:half_len], self.cols[half_len:]
+            self.columns = {
+                ((pos + half_cols_len) if pos < half_cols_len else (pos - half_cols_len)): col
+                for pos, col in self.columns.items()
+            }
+            self._is_opp = not self._is_opp
 
+        half_cols_len = self.NUM_COLS // 2
         if fake:
             yield self
         else:
@@ -244,31 +286,33 @@ class Board:
         May multiple moves.
         """
 
-        def _move(move: Move) -> Checker:
+        def _move(move: Move):
             """Move one checker from position with step."""
             from_pos, die = move
             to_pos = from_pos + die
-            if not self.cols[from_pos]:
+            if not self.columns[from_pos]:
                 raise MoveError('`From` position is empty.')
 
-            _checker = self.cols[from_pos][0]
+            from_col = self.columns[from_pos]
+            if from_col.is_opp != self._is_opp:
+                raise MoveError('`From` position is not player position.')
 
-            if to_pos < len(self.cols):
-                new_col = self.cols[to_pos]
-                if new_col and new_col[0] != _checker:
+            if to_pos < self.NUM_COLS:
+                new_col = self.columns[to_pos]
+                if new_col.checkers and new_col.is_opp != from_col.is_opp:
                     raise MoveError('`To` position is already opponent position.')
-                new_col.append(_checker)
+                self.columns[to_pos] = Column(from_col.is_opp, new_col.checkers + 1)
             else:
                 if not self.can_withdraw():
                     raise MoveError('Tried to withdraw checker when not all checkers in the home.')
-                if to_pos != len(self.cols):
+                if to_pos != self.NUM_COLS:
                     prev_positions = [pos for pos in self.get_occupied_positions() if pos < from_pos]
                     if prev_positions:
                         raise MoveError('Previous checkers can be withdraw.')
 
-            del self.cols[from_pos][0]
-
-            return _checker
+            # Todo: is it better to set is_opp=None if resulted checkers=0
+            from_checkers = from_col.checkers - 1
+            self.columns[from_pos] = Column(from_col.is_opp if from_checkers else None, from_checkers)
 
         def _rollback(*moves: Move):
             """Rollback all moves. Simple use `to` position and negative step."""
@@ -289,14 +333,14 @@ class Board:
     @contextmanager
     def temp_move(self, *moves: Move) -> 'Board':
         """Temp move checkers contextmanager. After we return checkers, where they were."""
-        cols = copy.deepcopy(self.cols)
+        columns = dict(self.columns)
         try:
             self.move(*moves)
             yield self
         except Exception as e:
             raise e
         finally:
-            self.cols = cols
+            self.columns = columns
 
     def has_block(self, block_size: int = 6) -> bool:
         """Check if there are any blocks (6 checkers in row). """
@@ -325,51 +369,6 @@ class Board:
 
         return any(opponent_home[0] <= pos < opponent_home[1] for pos in opponents_positions)
 
-    def was_finished(self) -> bool:
-        """Game was finished if one of players is winner."""
-        return any(
-            self.is_winner(checker_type)
-            for checker_type in self.CHECKER_TYPES
-        )
-
-    def is_winner(self, checker_type: Checker) -> bool:
-        """Check, that current checker_type does not have checkers on board."""
-        with self.viewpoint(checker_type):
-            return not list(self.get_occupied_positions())
-
-    def made_mars(self, checker_type: Checker) -> bool:
-        """Check, that this checker type made mars for opponent.
-
-        (Was finished, but all opponent checker are on board.)
-        """
-        with self.viewpoint(checker_type):
-            opponents_positions = self.get_occupied_positions(opponent=True)
-
-            return (
-                    self.is_winner(checker_type) and
-                    sum(
-                        len(self.cols[pos])
-                        for pos in opponents_positions
-                    ) == self.NUM_CHECKERS
-            )
-
-    def made_koks(self, checker_type: Checker) -> bool:
-        """Check, that this checker type made koks for opponent.
-
-        (Was finished, and one or more checkers of opponent are in first quadrant.)
-        """
-        with self.viewpoint(checker_type):
-            opponents_positions = self.get_occupied_positions(opponent=True)
-            opponent_home = (self.NUM_COLS // 2, 3 * self.NUM_COLS // 4)
-
-            return (
-                    self.is_winner(checker_type) and
-                    any(
-                        opponent_home[0] <= pos < opponent_home[1]
-                        for pos in opponents_positions
-                    )
-            )
-
     def check_move_available(self, *moves: Move) -> bool:
         """Check, that moves are available."""
         try:
@@ -391,11 +390,11 @@ class Board:
         """Simple check that board is correct.
          It means, that we have 15 checkers for each type of checkers (except situations, when all checkers are in home).
         """
-        for checker_type in self.CHECKER_TYPES:
-            with self.viewpoint(checker_type):
+        for fake in [True, False]:
+            with self.reverse(fake=fake):
                 if not self.can_withdraw():
                     positions = self.get_occupied_positions()
-                    total_checkers = sum(len(self.cols[pos]) for pos in positions)
+                    total_checkers = sum(self.columns[pos].checkers for pos in positions)
                     if total_checkers != self.NUM_CHECKERS:
                         raise ValueError('Incorrect board. Should heave 15 checkers for each type of checkers.')
                 if not self.can_make_blocks() and self.has_block():
@@ -427,7 +426,7 @@ class Board:
 
                         if new_dice:
                             new_positions = {new_pos for new_pos in from_positions if new_pos >= pos}
-                            if new_pos < len(self.cols):
+                            if new_pos < len(self.columns):
                                 new_positions.add(new_pos)
 
                             yield from (
@@ -437,6 +436,7 @@ class Board:
                         else:
                             yield current_moves
 
+        # dice = sorted(dice)
         positions = list(self.get_occupied_positions())
         is_double = (dice[0] == dice[1])
 
@@ -463,7 +463,12 @@ class Board:
                 if is_double and first_move:
                     die = dice[0]
                     if self.check_position_available(0 + die):
-                        available_moves.add(((0, die), (0, die)))
+                        double_move = ((0, die), (0, die))
+                        # Resolve bug, when we have ((0,6)) and ((0,6), (0,6)) moves
+                        if die == 6:
+                            return {double_move}
+
+                        available_moves.add(double_move)
 
                 return available_moves
 
@@ -491,40 +496,40 @@ class Game:
         self.players = players
         """Players of current game."""
 
-        for player, checker_type in zip(self.players, self.board.CHECKER_TYPES):
-            player.checker_type = checker_type
-
         who_start = random.randint(0, 1) if who_start is None else who_start
+        first_player_start = not bool(who_start)
+
         self._store['who_start'] = who_start
 
-        self.players_steps = itertools.cycle(self.players if not who_start else reversed(self.players))
+        self.players_steps = itertools.cycle(self.players if first_player_start else reversed(self.players))
         """Infinitive iterator for order of player steps. Starting player is random."""
 
-    def play(self) -> Agent:
-        """Play game. Return winner after end."""
-        current_player = self.board.was_finished()
-        while not self.board.was_finished():
+    def play(self) -> int:
+        """Play game. Return board status after end."""
+        is_opp = False
+        while self.board.status is None:
             current_player = next(self.players_steps)
-            self.make_step(player=current_player)
-
-        return current_player
+            self.make_step(player=current_player, is_opp=is_opp)
+            is_opp = not is_opp
+        return self.board.status
 
     def print(self, *values: Any) -> None:
         """Print value if logs flag is enabled."""
         if self.show_logs:
             print(values)
 
-    def make_step(self, player: Agent) -> None:
+    def make_step(self, player: Agent, is_opp: bool) -> None:
         """Roll dice, get available moves for them and get action from player.
 
         :param player: current Player.
+        :param is_opp: if player sit on opponent seat
         """
         dice = roll_dice()
         self._store['dice'].append(dice)
 
         if self.show_logs:
             self.board.print()
-        with self.board.viewpoint(player.checker_type):
+        with self.board.reverse(fake=not is_opp):
 
             available_moves = self.board.get_available_moves(dice)
 
@@ -539,4 +544,3 @@ class Game:
                 self.board.move(*moves)
 
                 self.print('Move:', moves)
-

@@ -75,11 +75,9 @@ if __name__ == '__main__':
     game = bg.Game(players=players, show_logs=False, who_start=store['who_start'])
     bg.roll_dice = roll_dice
 
-    while not game.board.was_finished():
-        current_player = next(game.players_steps)
-        game.make_step(player=current_player)
+    status = game.play()
 
     game.board.print()
+    print(status)
     print(game._store)
-    print(current_player.checker_type)
     print(time.time() - t1)

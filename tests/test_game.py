@@ -20,6 +20,16 @@ import backgammon.game as bg
     (
         (
             {0: 15, },
+            {0: 15},
+        ),
+        (6, 6),
+        {
+            ((0, 6), (0, 6))
+        }
+    ),
+    (
+        (
+            {0: 15, },
             {0: 15, },
         ),
         (3, 3),
@@ -200,8 +210,7 @@ import backgammon.game as bg
             ((0, 3), (2, 3), (3, 3), (5, 3)),
             ((0, 3), (2, 3), (4, 3), (7, 3)),
             ((4, 3), (7, 3), (10, 3), (13, 3))
-        }
-        ,
+        },
     )
 ])
 def test_available_moves(
@@ -216,84 +225,58 @@ def test_available_moves(
     assert available_moves == set(expected_moves)
 
 
-@pytest.mark.parametrize(['columns', 'is_mars', 'is_koks'], [
+@pytest.mark.parametrize(['columns', 'status'], [
     (
         (
             {22: 11, },
             {},
         ),
-        False,
-        False
+        -1
     ),
     (
         (
             {23: 15, },
             {},
         ),
-        True,
-        False
+        -2
     ),
     (
         (
             {23: 15, },
             {21: 10},
         ),
-        False,
-        False
+        None
     ),
     (
         (
-            {23: 15, },
             {},
+            {23: 15, }
         ),
-        True,
-        False
+        2
     ),
     (
         (
             {23: 13, },
             {},
         ),
-        False,
-        False
+        -1
     ),
     (
         (
             {23: 13, 4: 2},
             {},
         ),
-        True,
-        True
+        -3
     ),
     (
         (
             {},
             {23: 13, 4: 2},
         ),
-        True,
-        True
+        3
     ),
 ])
-def test_winner(columns: bg.ColumnCheckersNumber, is_mars: bool, is_koks: bool) -> None:
+def test_winner(columns: bg.ColumnCheckersNumber, status: bool) -> None:
     """Test, that we found correct winner with correct type of win."""
     board = bg.Board.from_schema(*columns)
-    game = bg.Game(players=[bg.Agent(), bg.Agent()])
-
-    game.board = board
-
-    winner = board.get_winner_checker_type()
-
-    was_finished = bool(winner)
-    assert game.board.was_finished() == was_finished
-    if winner:
-        with board.viewpoint(winner):
-            looser = board.opponent_checker
-
-            assert game.board.is_winner(winner)
-            assert not game.board.is_winner(looser)
-
-            assert game.board.made_mars(winner) == is_mars
-            assert not game.board.made_mars(looser)
-
-            assert game.board.made_koks(winner) == is_koks
-            assert not game.board.made_koks(looser)
+    assert board.status == status

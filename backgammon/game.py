@@ -426,11 +426,12 @@ class Board:
                         new_dice.remove(die)
 
                         if new_dice:
-                            new_positions = {*from_positions, new_pos} if new_pos < len(
-                                self.cols) else from_positions
+                            new_positions = {new_pos for new_pos in from_positions if new_pos >= pos}
+                            if new_pos < len(self.cols):
+                                new_positions.add(new_pos)
 
                             yield from (
-                                tuple(sorted(current_moves + sub_move, key=lambda m: m[0]))
+                                tuple(current_moves + sub_move)
                                 for sub_move in _get_moves(new_dice, new_positions)
                             )
                         else:

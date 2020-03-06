@@ -1,3 +1,1 @@
 pytest==3.8.0
-tensorflow-gpu==1.11.0
-tensorboard==1.11.0

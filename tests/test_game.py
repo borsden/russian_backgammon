@@ -222,7 +222,7 @@ def test_available_moves(
     board = bg.Board.from_schema(*columns)
 
     available_moves = board.get_available_moves(dice)
-    assert available_moves == set(expected_moves)
+    assert set(available_moves) == set(expected_moves)
 
 
 @pytest.mark.parametrize(['columns', 'status'], [
@@ -231,14 +231,14 @@ def test_available_moves(
             {22: 11, },
             {},
         ),
-        -1
+        1
     ),
     (
         (
             {23: 15, },
             {},
         ),
-        -2
+        2
     ),
     (
         (
@@ -259,14 +259,14 @@ def test_available_moves(
             {23: 13, },
             {},
         ),
-        -1
+        1
     ),
     (
         (
             {23: 13, 4: 2},
             {},
         ),
-        -3
+        3
     ),
     (
         (

@@ -7,11 +7,9 @@ from pydantic import Field
 from starlette.middleware.cors import CORSMiddleware
 
 import backgammon.game as bg
-from backgammon.agents import random_agent
+from backgammon import agents
 
 app = FastAPI(title="Russian backgammon API.")
-
-app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,7 +22,8 @@ app.add_middleware(
 
 class AgentTypes(Enum):
     """Agent types."""
-    random = random_agent.RandomAgent
+    random = agents.RandomAgent
+    # dqn = agents.NNAgent.with_model_constructor(DQN().load_state_dict('./123'))
 
     @property
     def agent(self):

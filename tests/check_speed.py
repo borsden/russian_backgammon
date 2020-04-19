@@ -2,7 +2,7 @@ import time
 from typing import Set
 
 import backgammon.game as bg
-from backgammon.agents.random_agent import RandomAgent
+from backgammon.agents import RandomAgent
 
 store = {
     'dice': [(3, 3), (6, 1), (3, 1), (3, 2), (5, 1), (1, 2), (3, 1), (6, 4), (3, 5), (6, 4), (3, 3), (2, 6), (6, 6),
@@ -77,7 +77,7 @@ if __name__ == '__main__':
 
     status = game.play()
 
-    game.board.print()
+    print(game.board)
     print(status)
     print(game._store)
     print(time.time() - t1)

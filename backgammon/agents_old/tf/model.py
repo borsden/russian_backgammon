@@ -9,9 +9,11 @@ import numpy as np
 import tensorflow as tf
 
 # from backgammon.agents.human_agent import HumanAgent
-from backgammon.agents.random_agent import RandomAgent
-from backgammon.agents.tf_agent import TfAgent
-from backgammon.game import Game, Board
+from tqdm import tqdm
+
+from backgammon.agents import RandomAgent
+from backgammon.agents_old.tf_agent import TfAgent
+import backgammon.game as bg
 
 
 # helper to initialize a weight and bias variable
@@ -30,7 +32,7 @@ def dense_layer(x, shape, activation, name):
 
 class Model:
 
-    LAYER_SIZE_INPUT = 722
+    LAYER_SIZE_INPUT = 720
     LAYER_SIZE_HIDDEN = 100
 
     def __init__(self, sess: tf.Session, path: str, restore: bool = False) -> None:
@@ -200,47 +202,52 @@ class Model:
     # def play(self):
     #     game = Game.new()
     #     game.play([TDAgent(Game.TOKENS[0], self), HumanAgent(Game.TOKENS[1])], draw=True)
+    #
+    def extract_features(self, board: bg.Board) -> np.ndarray:
+        """Create feature to insert in model.
+        Generate array of 720 features, 15 features for every position and same for opponent.
+        """
+        def get_features(columns: bg.ColumnCheckersNumber) -> np.ndarray:
+            features = np.zeros(board.NUM_COLS * board.NUM_CHECKERS)
+            for col in range(board.NUM_COLS):
+                if col in columns:
+                    start = col * board.NUM_CHECKERS
+                    end = start + columns[col]
+                    features[start:end] = 1
+            return features
 
-    def extract_features(self, board: Board) -> List[List[int]]:
-        """Create feature to insert in model."""
-        def _get_features(opponent: bool=False) -> List[float]:
-            positions_with_count = {
-                pos: len(board.cols[pos])
-                for pos in board.get_occupied_positions(opponent)
-            }
-            outed_checkers_percent = sum(positions_with_count.values()) / board.NUM_CHECKERS
-
-            _features = [[0]*board.NUM_CHECKERS for _ in range(board.NUM_COLS)]
-
-            for pos, count in positions_with_count.items():
-                _features[pos] = [1] * count + [0] * (board.NUM_CHECKERS - count)
-
-            return list(itertools.chain(*_features)) + [outed_checkers_percent]
-
-
-        features = _get_features() + _get_features(opponent=True)
-        return np.array(features).reshape(1, -1)
+        columns, opp_columns = board.to_schema()
+        features = np.concatenate((get_features(columns), get_features(opp_columns)))
+        return features.reshape(1, -1)
 
     def test(self, episodes=100):
-        players = [TfAgent(self), RandomAgent()]
-        winners = {player: 0 for player in players}
-        for episode in range(episodes):
-            game = Game(players=players)
+        player, opp = (TfAgent(self), RandomAgent())
+        players = (player, opp)
 
-            winner = game.play()
+        winners = {pl: 0 for pl in players}
+        marses = {pl: 0 for pl in players}
+        kokses = {pl: 0 for pl in players}
+
+        for episode in tqdm(range(episodes)):
+            game = bg.Game(players=players, show_logs=False)
+
+            winner, status = game.play()
+
             winners[winner] += 1
 
-            winners_list = list(winners.values())
+            if status == 2:
+                marses[winner] += 1
+            elif status == 3:
+                kokses[winner] += 1
 
-            winners_total = sum(winners_list)
-            print("[Episode %d] %s vs %s %d:%d of %d games (%.2f%%)" % (
-                episode,
-                players[0].name,
-                players[1].name,
-                winners_list[0], winners_list[1],
-                winners_total,
-                (winners_list[0] / winners_total) * 100.0
-            ))
+            winners_total = sum(list(winners.values()))
+            tqdm.write(
+                f"[Episode {episode}] {player.name} vs {opp.name} "
+                f"{winners[player]}:{winners[opp]} of {winners_total} games "
+                f"- ({(winners[player] / winners_total) * 100.0:.2f})% "
+                f"| Mars-{marses[player]}/{marses[opp]}; Koks-{kokses[player]}/{kokses[opp]}"
+            )
+            players = tuple(reversed(players))
 
     def train(self):
         tf.train.write_graph(self.sess.graph, self.path, 'model.pb', as_text=False)
@@ -250,37 +257,32 @@ class Model:
         )
 
         # the agent plays against itself, making the best move for each player
-        players = [TfAgent(self), TfAgent(self)]
+        players = (TfAgent(self), TfAgent(self))
 
-        validation_interval = 250
+        validation_interval = 500
         episodes = 5000
 
         for episode in range(episodes):
-            game = Game(players=players)
+            game = bg.Game(players=players)
 
             game_step = 0
 
-            x = self.extract_features(game)
+            x = self.extract_features(game.board)
 
-            while not game.board.was_finished():
+            is_opp = True
+
+            while game.board.status is None:
                 current_player = next(game.players_steps)
-                game.make_step(player=current_player)
+                with game.board.reverse(fake=not is_opp) as board:
+                    game.make_step(player=current_player, board=board)
+                    x_next = self.extract_features(game.board)
+                    V_next = self.get_output(x_next)
 
-                x_next = self.extract_features(game)
-                V_next = self.get_output(x_next)
                 self.sess.run(self.train_op, feed_dict={self.x: x, self.V_next: V_next})
-
                 x = x_next
                 game_step += 1
 
-            V_next = 1 if current_player == game.players else -1
-
-            if game.board.made_koks(current_player.checker_type):
-                V_next *= 3
-            elif game.board.made_mars(current_player.checker_type):
-                V_next *= 2
-
-            V_next = 1 if current_player == game.players[0] else 0
+            V_next = game.board.status
 
             _, global_step, summaries, _ = self.sess.run([
                 self.train_op,
@@ -290,12 +292,12 @@ class Model:
             ], feed_dict={self.x: x, self.V_next: np.array([[V_next]], dtype='float')})
 
             summary_writer.add_summary(summaries, global_step=global_step)
-
-            print(("Game %d/%d (Winner: %s) in %d turns" % (episode, episodes, current_player.checker_type, game_step)))
+            winner = 'X' if current_player == players[0] else 'O'
+            print(f"Game {episode}/{episodes} (Winner: {winner}) in {game_step} turns")
 
             if (episode + 1) % validation_interval == 0:
                 self.saver.save(self.sess, os.path.join(self.checkpoint_path, 'checkpoint'), global_step=global_step)
-                self.test(episodes=25)
+                self.test(episodes=100)
 
         summary_writer.close()
 
@@ -307,7 +309,7 @@ class Model2(Model):
     LAYER_SIZE_HIDDEN = 25
 
     @classmethod
-    def extract_features(self, board: Board) -> List[List[float]]:
+    def extract_features(self, board: bg.Board) -> List[List[float]]:
         """Create feature to insert in model."""
         def _get_features(opponent: bool=False) -> List[float]:
             positions_with_count = {

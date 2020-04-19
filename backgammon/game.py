@@ -1,8 +1,8 @@
 import abc
-import copy
 import itertools
 import random
 from contextlib import contextmanager
+from copy import copy
 from typing import List, Tuple, NamedTuple, Sequence, Set, Iterator, Any, Optional, Dict
 
 
@@ -18,7 +18,7 @@ class Agent:
         return self.__class__.__name__
 
     @abc.abstractmethod
-    def get_action(self, available_moves: Set['Moves'], board: 'Board') -> 'Moves':
+    def get_action(self, available_moves: List['Moves'], board: 'Board') -> 'Moves':
         """Strategy of player."""
 
 
@@ -50,7 +50,7 @@ def roll_dice() -> Dice:
 
 class Column(NamedTuple):
     """Column of a board."""
-    is_opp: Optional[bool] = None
+    is_opp: bool = None
     """Indicate type of checkers in column. True for opponent (opponent by default), False for player."""
     checkers: int = 0
     """Number of checkers into column."""
@@ -65,24 +65,31 @@ class Board:
 
     def __init__(self, empty=False) -> None:
         # Columns of a board.
-        self.columns: Dict[int, Column] = {
+        self._columns: Dict[int, Column] = {
             column: Column() for column in range(self.NUM_COLS)
         }
 
         if not empty:
             # Add checkers at the heads.
-            self.columns[0] = Column(False, self.NUM_CHECKERS)
-            self.columns[self.NUM_COLS // 2] = Column(True, self.NUM_CHECKERS)
+            self._columns[0] = Column(False, self.NUM_CHECKERS)
+            self._columns[self.NUM_COLS // 2] = Column(True, self.NUM_CHECKERS)
 
         # Flag to check, that board is reversed
         self._is_opp = False
 
+    def __copy__(self):
+        """Return new instance of current board."""
+        new_board = Board(empty=True)
+        new_board._columns = copy(self._columns)
+        new_board._is_opp = self._is_opp
+        return new_board
+
     @classmethod
     def from_schema(
-            cls,
-            x_columns: ColumnCheckersNumber,
-            y_columns: ColumnCheckersNumber,
-            straight: bool = False
+        cls,
+        x_columns: ColumnCheckersNumber,
+        y_columns: ColumnCheckersNumber,
+        straight: bool = False
     ) -> 'Board':
         """Method to create board from passed columns and number of checkers there.
 
@@ -94,10 +101,10 @@ class Board:
 
         def fill_board(board: Board, columns: ColumnCheckersNumber, is_opp: bool) -> None:
             for pos, checkers in columns.items():
-                if board.columns[pos].checkers:
+                if board._columns[pos].checkers:
                     raise ValueError(f'Columns should not include both types of checkers.')
 
-                board.columns[pos] = Column(is_opp, checkers)
+                board._columns[pos] = Column(is_opp, checkers)
 
         board = cls(empty=True)
 
@@ -116,11 +123,11 @@ class Board:
                 (0->23, 2->21, ...)
         """
         positions = self.get_occupied_positions()
-        column_checker = {pos: self.columns[pos].checkers for pos in positions}
+        column_checker = {pos: self._columns[pos].checkers for pos in positions}
 
         with self.reverse(fake=straight) as board:
             opponent_positions = board.get_occupied_positions(opponent=straight)
-            opponent_column_checker = {pos: board.columns[pos].checkers for pos in opponent_positions}
+            opponent_column_checker = {pos: board._columns[pos].checkers for pos in opponent_positions}
         return column_checker, opponent_column_checker
 
     def is_winner(self, is_opp: bool) -> bool:
@@ -139,7 +146,7 @@ class Board:
         return (
                 self.is_winner(is_opp) and
                 sum(
-                    len(self.columns[pos])
+                    len(self._columns[pos])
                     for pos in opponents_positions
                 ) == self.NUM_CHECKERS
         )
@@ -169,14 +176,14 @@ class Board:
         """
 
         def _status(is_opp):
-            K = -1 if is_opp else 1
+            K = 1
             with self.reverse(fake=not is_opp):
                 finished = not list(self.get_occupied_positions())
                 # Check, if player don't have any checkers on a board.
                 if finished:
                     opp_positions = list(self.get_occupied_positions(opponent=True))
                     # Check, if opponent have all checkers on a board. (MARS)
-                    if sum(self.columns[pos].checkers for pos in opp_positions) == self.NUM_CHECKERS:
+                    if sum(self._columns[pos].checkers for pos in opp_positions) == self.NUM_CHECKERS:
                         opponent_home = (self.NUM_COLS // 2, 3 * self.NUM_COLS // 4)
                         # Check, if one or more checkers of opponent are in first quadrant.
                         if any(opponent_home[0] <= pos < opponent_home[1] for pos in opp_positions):
@@ -193,7 +200,7 @@ class Board:
         :param opponent: find occupied positions for opponent
         """
         return (
-            pos for pos, col in self.columns.items()
+            pos for pos, col in self._columns.items()
             if col.checkers and
                opponent != (col.is_opp == self._is_opp)
         )
@@ -205,21 +212,21 @@ class Board:
         :param position: position
         """
         if position < self.NUM_COLS:
-            column = self.columns[position]
+            column = self._columns[position]
             return not column.checkers or column.is_opp == self._is_opp
         else:
             return True
 
-    def print(self) -> None:
+    def __repr__(self) -> str:
         """Draw current board."""
 
         def half_row() -> List[List[str]]:
             """Make quadrants of board with current position."""
-            max_length = max(self.columns[pos].checkers for pos in range(half_cols_len))
+            max_length = max(self._columns[pos].checkers for pos in range(half_cols_len))
 
             rows = [
                 [
-                    (' o' if self.columns[pos].is_opp else ' x') if self.columns[pos].checkers > checker_pos else '  '
+                    (' o' if self._columns[pos].is_opp else ' x') if self._columns[pos].checkers > checker_pos else '  '
                     for pos in range(half_cols_len)
                 ]
                 for checker_pos in range(max_length)
@@ -255,8 +262,9 @@ class Board:
                 *[list(reversed(row)) for row in rows],
                 *reversed_rows
             ]
-            for r in rows:
-                print(' '.join(r))
+            output = '\n'.join(' '.join(r) for r in rows)
+            return f'Board\n{output}'
+
 
     @contextmanager
     def reverse(self, fake: bool = False) -> 'Board':
@@ -266,9 +274,9 @@ class Board:
         """
 
         def _reverse():
-            self.columns = {
+            self._columns = {
                 ((pos + half_cols_len) if pos < half_cols_len else (pos - half_cols_len)): col
-                for pos, col in self.columns.items()
+                for pos, col in self._columns.items()
             }
             self._is_opp = not self._is_opp
 
@@ -290,18 +298,20 @@ class Board:
             """Move one checker from position with step."""
             from_pos, die = move
             to_pos = from_pos + die
-            if not self.columns[from_pos]:
+            # if not from_pos in self._columns:
+            #     raise MoveError('`From` position is out of board.')
+            if not self._columns[from_pos]:
                 raise MoveError('`From` position is empty.')
 
-            from_col = self.columns[from_pos]
+            from_col = self._columns[from_pos]
             if from_col.is_opp != self._is_opp:
                 raise MoveError('`From` position is not player position.')
 
             if to_pos < self.NUM_COLS:
-                new_col = self.columns[to_pos]
+                new_col = self._columns[to_pos]
                 if new_col.checkers and new_col.is_opp != from_col.is_opp:
                     raise MoveError('`To` position is already opponent position.')
-                self.columns[to_pos] = Column(from_col.is_opp, new_col.checkers + 1)
+                self._columns[to_pos] = Column(from_col.is_opp, new_col.checkers + 1)
             else:
                 if not self.can_withdraw():
                     raise MoveError('Tried to withdraw checker when not all checkers in the home.')
@@ -312,35 +322,31 @@ class Board:
 
             # Todo: is it better to set is_opp=None if resulted checkers=0
             from_checkers = from_col.checkers - 1
-            self.columns[from_pos] = Column(from_col.is_opp if from_checkers else None, from_checkers)
-
-        def _rollback(*moves: Move):
-            """Rollback all moves. Simple use `to` position and negative step."""
-            rollback_moves = ((move[0] + move[1], -move[1]) for move in reversed(moves))
-            for move in rollback_moves:
-                _move(move)
+            self._columns[from_pos] = Column(from_col.is_opp if from_checkers else None, from_checkers)
 
         if not moves:
             raise MoveError('Must be at least one move in args.')
+
+        prev_columns = self._columns.copy()
 
         for move in moves:
             _move(move)
 
         if not self.can_make_blocks() and self.has_block():
-            _rollback(*moves)
+            self._columns = prev_columns
             raise MoveError('Block is unavailable while opponent has not at least one checker in home.')
 
     @contextmanager
     def temp_move(self, *moves: Move) -> 'Board':
         """Temp move checkers contextmanager. After we return checkers, where they were."""
-        columns = dict(self.columns)
+        columns = dict(self._columns)
         try:
             self.move(*moves)
             yield self
         except Exception as e:
             raise e
         finally:
-            self.columns = columns
+            self._columns = columns
 
     def has_block(self, block_size: int = 6) -> bool:
         """Check if there are any blocks (6 checkers in row). """
@@ -394,13 +400,13 @@ class Board:
             with self.reverse(fake=fake):
                 if not self.can_withdraw():
                     positions = self.get_occupied_positions()
-                    total_checkers = sum(self.columns[pos].checkers for pos in positions)
+                    total_checkers = sum(self._columns[pos].checkers for pos in positions)
                     if total_checkers != self.NUM_CHECKERS:
                         raise ValueError('Incorrect board. Should heave 15 checkers for each type of checkers.')
                 if not self.can_make_blocks() and self.has_block():
                     raise ValueError('Can block only if at least one opponent checker is in home.')
 
-    def get_available_moves(self, dice: Dice) -> Set[Moves]:
+    def get_available_moves(self, dice: Dice) -> List[Moves]:
         """Return available moves with specified dice.
 
         :param dice: dice
@@ -426,7 +432,7 @@ class Board:
 
                         if new_dice:
                             new_positions = {new_pos for new_pos in from_positions if new_pos >= pos}
-                            if new_pos < len(self.columns):
+                            if new_pos < len(self._columns):
                                 new_positions.add(new_pos)
 
                             yield from (
@@ -466,19 +472,19 @@ class Board:
                         double_move = ((0, die), (0, die))
                         # Resolve bug, when we have ((0,6)) and ((0,6), (0,6)) moves
                         if die == 6:
-                            return {double_move}
+                            return [double_move]
 
                         available_moves.add(double_move)
 
-                return available_moves
+                return list(available_moves)
 
-        return set()
+        return []
 
 
 class Game:
     """Game. """
 
-    def __init__(self, players: List[Agent], show_logs: bool = False, who_start: Optional[int] = None) -> None:
+    def __init__(self, players: Tuple[Agent, Agent], show_logs: bool = False, who_start: int = None) -> None:
         """
         :param players: agents, who play this game
         :param show_logs: do we want logout
@@ -504,43 +510,57 @@ class Game:
         self.players_steps = itertools.cycle(self.players if first_player_start else reversed(self.players))
         """Infinitive iterator for order of player steps. Starting player is random."""
 
-    def play(self) -> int:
-        """Play game. Return board status after end."""
+    def play_step_by_step(self) -> Iterator[Tuple[Agent, Board, Board, Moves, List[Moves]]]:
+        """Play game. Yield on every step player, prev board, board after move, selected move and available moves."""
         is_opp = False
         while self.board.status is None:
             current_player = next(self.players_steps)
-            self.make_step(player=current_player, is_opp=is_opp)
+            with self.board.reverse(fake=not is_opp) as board:
+                prev_board = copy(board)
+                moves, available_moves = self.make_step(player=current_player, board=board)
+                yield current_player, board, prev_board, moves, available_moves
             is_opp = not is_opp
-        return self.board.status
+
+    def play(self) -> Tuple[Agent, int]:
+        """Play game. Return winner and board status after end."""
+        current_player, board = None, None
+        for current_player, board, _, _, _ in self.play_step_by_step():
+            pass
+        return current_player, board.status
 
     def print(self, *values: Any) -> None:
         """Print value if logs flag is enabled."""
         if self.show_logs:
             print(values)
 
-    def make_step(self, player: Agent, is_opp: bool) -> None:
+    def make_step(self, player: Agent, board: Board) -> Tuple[Optional[Moves], List[Moves]]:
         """Roll dice, get available moves for them and get action from player.
 
         :param player: current Player.
-        :param is_opp: if player sit on opponent seat
+        :param board: current Board
         """
         dice = roll_dice()
         self._store['dice'].append(dice)
 
+        available_moves = board.get_available_moves(dice)
+
+        self.print('Player', player)
+        self.print('Dice:', dice)
+        self.print('Available moves:', available_moves)
+        moves = None
+        if available_moves:
+            moves = player.get_action(available_moves, board)
+            self._store['moves'].append(moves)
+            # self.print('Move:', moves)
+
+            board.move(*moves)
+            # self.print('Move:', moves)
+        # else:
+        #     self.print('NO AVAILABLE MOVES.')
+
         if self.show_logs:
-            self.board.print()
-        with self.board.reverse(fake=not is_opp):
+            with board.reverse(fake=not board._is_opp) as b:
+                print(b)
 
-            available_moves = self.board.get_available_moves(dice)
+        return moves, available_moves
 
-            self.print('Dice:', dice)
-            self.print('Available moves:', available_moves)
-
-            if available_moves:
-                moves = player.get_action(available_moves, self.board)
-                self._store['moves'].append(moves)
-                self.print('Move:', moves)
-
-                self.board.move(*moves)
-
-                self.print('Move:', moves)

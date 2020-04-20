@@ -1,19 +1,15 @@
-from typing import List
-
-import itertools
 import os
 import pathlib
 import time
 
 import numpy as np
 import tensorflow as tf
-
 # from backgammon.agents.human_agent import HumanAgent
 from tqdm import tqdm
 
+import backgammon.game as bg
 from backgammon.agents import RandomAgent
 from backgammon.agents_old.tf_agent import TfAgent
-import backgammon.game as bg
 
 
 # helper to initialize a weight and bias variable
@@ -197,25 +193,6 @@ class Model:
 
     def get_output(self, x):
         return self.sess.run(self.V, feed_dict={self.x: x})
-    #
-    # def extract_features(self, board: bg.Board) -> List[List[float]]:
-    #     """Create feature to insert in model."""
-    #     def get_features(columns: bg.ColumnCheckersNumber) -> np.ndarray:
-    #         features = np.zeros(board.NUM_COLS)
-    #         for col in range(board.NUM_COLS):
-    #             if col in columns:
-    #                 features[col] = columns[col] / board.NUM_CHECKERS
-    #         return features
-    #
-    #     columns, opp_columns = board.to_schema()
-    #     features = np.concatenate((get_features(columns), get_features(opp_columns)))
-    #     return features.reshape(1, -1)
-
-    #
-    # def play(self):
-    #     game = Game.new()
-    #     game.play([TDAgent(Game.TOKENS[0], self), HumanAgent(Game.TOKENS[1])], draw=True)
-    #
 
     def extract_features(self, board: bg.Board) -> np.ndarray:
         """Create feature to insert in model.
@@ -281,28 +258,6 @@ class Model:
 
             game_step = 0
 
-            # x = self.extract_features(game)
-            #
-            # while not game.board.was_finished():
-            #     current_player = next(game.players_steps)
-            #     game.make_step(player=current_player)
-            #
-            #     x_next = self.extract_features(game)
-            #     V_next = self.get_output(x_next)
-            #     self.sess.run(self.train_op, feed_dict={self.x: x, self.V_next: V_next})
-            #
-            #     x = x_next
-            #     game_step += 1
-            #
-            # V_next = 1 if current_player == game.players else -1
-            #
-            # if game.board.made_koks(current_player.checker_type):
-            #     V_next *= 3
-            # elif game.board.made_mars(current_player.checker_type):
-            #     V_next *= 2
-            #
-            # V_next = 1 if current_player == game.players[0] else 0
-
             x = self.extract_features(game.board)
 
             while game.board.status is None:
@@ -317,9 +272,7 @@ class Model:
                 x = x_next
                 game_step += 1
 
-            V_next = game.board.status
-            if current_player != player:
-                V_next *= -1
+            V_next = 0 if current_player != player else 1
 
             _, global_step, summaries, _ = self.sess.run([
                 self.train_op,

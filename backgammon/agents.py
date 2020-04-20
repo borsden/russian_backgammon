@@ -1,5 +1,6 @@
 import asyncio
 import json
+import multiprocessing
 import random
 from functools import partial
 from typing import Set, Callable, List, Iterator
@@ -29,6 +30,7 @@ class NNAgent(bg.Agent):
         """Create feature to insert in model.
         Generate array of 720 features, 15 features for every position and same for opponent.
         """
+
         def get_features(columns: bg.ColumnCheckersNumber) -> np.ndarray:
             features = np.zeros(board.NUM_COLS * board.NUM_CHECKERS)
             for col in range(board.NUM_COLS):
@@ -41,7 +43,6 @@ class NNAgent(bg.Agent):
         columns, opp_columns = board.to_schema()
         features = np.concatenate((get_features(columns), get_features(opp_columns)))
         return torch.from_numpy(features).float().cuda()
-
 
     def estimate_moves(self, available_moves: List[bg.Moves], board: bg.Board) -> Iterator[float]:
         """Estimate resulting board position for all passed moves."""
@@ -80,6 +81,7 @@ class NNAgent(bg.Agent):
 class TCPAgent(bg.Agent):
     def get_action(self, available_moves: List[bg.Moves], board: bg.Board) -> bg.Moves:
         """Send a message to the server, wait an answer and use it."""
+
         async def tcp_echo_client(message):
             reader, writer = await asyncio.open_connection(self.host, self.port)
             writer.write(message.encode())
@@ -91,17 +93,65 @@ class TCPAgent(bg.Agent):
         done = asyncio.run(tcp_echo_client(message))
         return done
 
-    def __init__(self, host: str = None, port: int = None):
+    def __init__(self, host: str = None, port: int = None, agent_name: str = None):
         self.host = host
         self.port = port
+        self.agent_name = agent_name
 
     def __repr__(self):
-        return f'{self.__class__.__name__}[{self.port}]'
+        information = ''
+        if self.host:
+            information += f'[{self.host}]'
+        if self.port:
+            information += f'[:{self.port}]'
+        if self.agent_name:
+            information += f'[{self.agent_name}]'
+
+        return f'{self.__class__.__name__}{information}'
 
     @classmethod
-    def as_server(cls, agent: bg.Agent, host: str = None, port: int = None):
-        """Create a TCP server, which can receive board and available values and select an action."""
-        async def handle_echo(reader, writer):
+    def with_server(
+        cls,
+        agent_initializer: Callable[[], bg.Agent],
+        port: int = None, host: str = None
+    ) -> 'TCPAgent':
+        """Run server in child process, return insta"""
+        if not host and not port:
+            raise ValueError('Should specified at least host or port.')
+
+        pipe = multiprocessing.Pipe(False)
+        proc = multiprocessing.Process(
+            target=cls._server_runner,
+            args=(agent_initializer,),
+            kwargs=dict(port=port, host=host, pipe=pipe)
+        )
+        proc.start()
+
+        pipe_out, _ = pipe
+        agent_name = pipe_out.recv()
+
+        return cls(
+            host=host, port=port, agent_name=agent_name
+        )
+
+    @classmethod
+    def _server_runner(
+        cls,
+        agent_initializer: Callable[[], bg.Agent],
+        host: str = None,
+        port: int = None,
+        pipe: multiprocessing.Pipe = None
+    ) -> None:
+        """Create a TCP server, which can receive board and available values and select an action.
+
+        :param agent_initializer: function to initialize Agent. Do not pass Agent instance directly, because there are
+        situations, where we should generate it already in another process.
+        :param host: host
+        :param port: port
+        :param pipe: Pipe. Send name of created agent, if specified.
+        """
+
+        async def handle(reader, writer):
             data = await reader.read(100000)
             message = json.loads(data.decode())
             move = agent.get_action(
@@ -112,15 +162,15 @@ class TCPAgent(bg.Agent):
             await writer.drain()
             writer.close()
 
-        loop = asyncio.get_event_loop()
-        coro = asyncio.start_server(handle_echo, host, port, loop=loop)
-        server = loop.run_until_complete(coro)
+        async def run_server():
+            server = await asyncio.start_server(handle, host, port)
+            async with server:
+                await server.serve_forever()
 
-        try:
-            loop.run_forever()
-        except KeyboardInterrupt:
-            pass
+        agent = agent_initializer()
 
-        server.close()
-        loop.run_until_complete(server.wait_closed())
-        loop.close()
+        if pipe:
+            _, pipe_in = pipe
+            pipe_in.send(str(agent))
+
+        asyncio.run(run_server())

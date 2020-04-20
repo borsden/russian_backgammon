@@ -38,13 +38,13 @@ class Model:
     def __init__(self, sess: tf.Session, path: str, restore: bool = False) -> None:
         """Create tensorflow model. Write graph"""
 
-        self.path = path
-        self.checkpoint_path = os.path.join(path, 'checkpoints')
-        self.summaries_path = os.path.join(path, 'summaries')
+        self.path = pathlib.Path(path)
+        self.checkpoint_path = self.path / 'checkpoints'
+        self.summaries_path = self.path / 'summaries'
 
-        pathlib.Path(self.path).mkdir(parents=True, exist_ok=True)
-        pathlib.Path(self.checkpoint_path).mkdir(parents=True, exist_ok=True)
-        pathlib.Path(self.summaries_path).mkdir(parents=True, exist_ok=True)
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.checkpoint_path.mkdir(parents=True, exist_ok=True)
+        self.summaries_path.mkdir(parents=True, exist_ok=True)
 
         # setup our session
         self.sess = sess

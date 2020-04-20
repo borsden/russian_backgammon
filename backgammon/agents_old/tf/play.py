@@ -11,42 +11,35 @@ from backgammon.agents_old.tf_agent import TfAgent
 import backgammon.game as bg
 
 
-def runner(port, path):
-    graph = tf.Graph()
-    config = tf.ConfigProto(
-        device_count={'GPU': 0}
-    )
-    sess = tf.Session(graph=graph, config=config)
-    with sess.as_default():
-        with graph.as_default():
-            model = Model(sess, path, restore=True)
-            agent = TfAgent(model)
-
-            agents.TCPAgent.as_server(agent, port=port)
-
-
+def initializer(path):
+    def send_inside():
+        graph = tf.Graph()
+        config = tf.ConfigProto(
+            device_count={'GPU': 0}
+        )
+        sess = tf.Session(graph=graph, config=config)
+        with sess.as_default():
+            with graph.as_default():
+                model = Model(sess, path, restore=True)
+                agent = TfAgent(model)
+                return agent
+    return send_inside
+#
+#
 PATHS = [
     pathlib.Path('/home/borsden/Projects/russian_backgammon/models/tf') / '1587324086_720_input',
-    pathlib.Path('/home/borsden/Projects/russian_backgammon/models/tf') / '1587324086_720_input'
+    pathlib.Path('/home/borsden/Projects/russian_backgammon/models/tf') / '1587326248_720_input_mars_koks'
 ]
-
-
-def start_tcp(ports):
-    procs = []
-
-    for port, path in zip(ports, PATHS):
-        proc = Process(target=runner, args=(port, path))
-        procs.append(proc)
-        proc.start()
-
+#
 
 if __name__ == '__main__':
     ports = [8000, 10000]
-    start_tcp(ports)
 
-    player, opp = [agents.TCPAgent(port=port) for port in ports]
+    player, opp = [
+        agents.TCPAgent.with_server(initializer(path), port=port)
+        for port, path in zip(ports, PATHS)
+    ]
 
-    player.__repr__ = lambda *args: 'TCPAgent[1]'
     players = (player, opp)
 
     time.sleep(1)

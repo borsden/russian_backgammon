@@ -129,4 +129,4 @@ async def roll_dice(schema: MoveSchema):
 @app.get("/available_agents", response_model=Set[str])
 async def available_agents():
     """Endpoint to receive available agents."""
-    return {i.name for i in AgentTypes}
+    return {i for i in AgentTypes}

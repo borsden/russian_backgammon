@@ -13,8 +13,7 @@ class MoveError(Exception):
 class Agent:
     """Player."""
 
-    @property
-    def name(self) -> str:
+    def __repr__(self):
         return self.__class__.__name__
 
     @abc.abstractmethod
@@ -101,10 +100,10 @@ class Board:
 
         def fill_board(board: Board, columns: ColumnCheckersNumber, is_opp: bool) -> None:
             for pos, checkers in columns.items():
-                if board._columns[pos].checkers:
+                if board._columns[int(pos)].checkers:
                     raise ValueError(f'Columns should not include both types of checkers.')
 
-                board._columns[pos] = Column(is_opp, checkers)
+                board._columns[int(pos)] = Column(is_opp, checkers)
 
         board = cls(empty=True)
 
@@ -349,7 +348,7 @@ class Board:
             self._columns = columns
 
     def has_block(self, block_size: int = 6) -> bool:
-        """Check if there are any blocks (6 checkers in row). """
+        """Check if there are any blocks (6 checkers in row)."""
 
         def possible_blocks(iterable: Iterator[Any]) -> Iterator[Any]:
             """s -> (s0,s1, s2, s3, s4, s5), (s1,s2, s3, s4, s5, s6), ..."""
@@ -359,10 +358,11 @@ class Board:
                     next(_iter, None)
             return zip(*_iterators)
 
-        return any(
-            (block[-1] - block[0]) == (block_size - 1)
-            for block in possible_blocks(self.get_occupied_positions())
-        )
+        with self.reverse() as board:
+            return any(
+                (block[-1] - block[0]) == (block_size - 1)
+                for block in possible_blocks(board.get_occupied_positions(opponent=True))
+            )
 
     def can_make_blocks(self) -> bool:
         """Check that blocks is available.

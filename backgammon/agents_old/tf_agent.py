@@ -15,12 +15,19 @@ class TfAgent(bg.Agent):
         best_moves = None
 
         for moves in available_moves:
-            with board.temp_move(*moves):
-                features = self.model.extract_features(board)
-                v = self.model.get_output(features)
-                if v > v_best:
-                    v_best = v
-                    best_moves = moves
+            try:
+                with board.temp_move(*moves):
+                    features = self.model.extract_features(board)
+                    v = self.model.get_output(features)
+                    if v > v_best:
+                        v_best = v
+                        best_moves = moves
+            except Exception as e:
+                print(board)
+                print(board.to_schema())
+                print(available_moves)
+                print(moves)
+                raise e
 
         # pprint(__res)
         return best_moves

@@ -90,7 +90,7 @@ class Trainer:
 
                 winners_total = sum(list(winners.values()))
                 tqdm.write(
-                    f"[Episode {episode}] {player.name} vs {opp.name} "
+                    f"[Episode {episode}] {player} vs {opp} "
                     f"{winners[player]}:{winners[opp]} of {winners_total} games "
                     f"- ({(winners[player] / winners_total) * 100.0:.2f})% "
                     f"| Mars-{marses[player]}/{marses[opp]}; Koks-{kokses[player]}/{kokses[opp]}",
@@ -218,7 +218,7 @@ def play(episodes=100):
 
         winners_total = sum(list(winners.values()))
         tqdm.write(
-            f"[Episode {episode}] {player.name} vs {opp.name} "
+            f"[Episode {episode}] {player} vs {opp} "
             f"{winners[player]}:{winners[opp]} of {winners_total} games "
             f"- ({(winners[player] / winners_total) * 100.0:.2f})% "
             f"| Mars-{marses[player]}/{marses[opp]}; Koks-{kokses[player]}/{kokses[opp]}",

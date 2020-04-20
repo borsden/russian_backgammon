@@ -61,7 +61,7 @@ all_moves = (moves for moves in store['moves'])
 
 
 class FakeRandomAgent(RandomAgent):
-    def get_action(self, available_moves: Set[bg.Moves], game: bg.Game) -> bg.Moves:
+    def get_action(self, available_moves: Set[bg.Moves], board: bg.Board) -> bg.Moves:
         return next(all_moves)
 
 
@@ -71,7 +71,7 @@ def roll_dice(*args, **kwargs):
 
 if __name__ == '__main__':
     t1 = time.time()
-    players = [FakeRandomAgent(), FakeRandomAgent()]
+    players = (FakeRandomAgent(), FakeRandomAgent())
     game = bg.Game(players=players, show_logs=False, who_start=store['who_start'])
     bg.roll_dice = roll_dice
 

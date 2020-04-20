@@ -197,12 +197,26 @@ class Model:
 
     def get_output(self, x):
         return self.sess.run(self.V, feed_dict={self.x: x})
+    #
+    # def extract_features(self, board: bg.Board) -> List[List[float]]:
+    #     """Create feature to insert in model."""
+    #     def get_features(columns: bg.ColumnCheckersNumber) -> np.ndarray:
+    #         features = np.zeros(board.NUM_COLS)
+    #         for col in range(board.NUM_COLS):
+    #             if col in columns:
+    #                 features[col] = columns[col] / board.NUM_CHECKERS
+    #         return features
+    #
+    #     columns, opp_columns = board.to_schema()
+    #     features = np.concatenate((get_features(columns), get_features(opp_columns)))
+    #     return features.reshape(1, -1)
 
     #
     # def play(self):
     #     game = Game.new()
     #     game.play([TDAgent(Game.TOKENS[0], self), HumanAgent(Game.TOKENS[1])], draw=True)
     #
+
     def extract_features(self, board: bg.Board) -> np.ndarray:
         """Create feature to insert in model.
         Generate array of 720 features, 15 features for every position and same for opponent.
@@ -242,7 +256,7 @@ class Model:
 
             winners_total = sum(list(winners.values()))
             tqdm.write(
-                f"[Episode {episode}] {player.name} vs {opp.name} "
+                f"[Episode {episode}] {player} vs {opp} "
                 f"{winners[player]}:{winners[opp]} of {winners_total} games "
                 f"- ({(winners[player] / winners_total) * 100.0:.2f})% "
                 f"| Mars-{marses[player]}/{marses[opp]}; Koks-{kokses[player]}/{kokses[opp]}"
@@ -257,32 +271,55 @@ class Model:
         )
 
         # the agent plays against itself, making the best move for each player
-        players = (TfAgent(self), TfAgent(self))
+        players = (player, opp) = (TfAgent(self), TfAgent(self))
 
         validation_interval = 500
-        episodes = 5000
+        episodes = 3000
 
-        for episode in range(episodes):
+        for episode in tqdm(range(episodes)):
             game = bg.Game(players=players)
 
             game_step = 0
 
-            x = self.extract_features(game.board)
+            # x = self.extract_features(game)
+            #
+            # while not game.board.was_finished():
+            #     current_player = next(game.players_steps)
+            #     game.make_step(player=current_player)
+            #
+            #     x_next = self.extract_features(game)
+            #     V_next = self.get_output(x_next)
+            #     self.sess.run(self.train_op, feed_dict={self.x: x, self.V_next: V_next})
+            #
+            #     x = x_next
+            #     game_step += 1
+            #
+            # V_next = 1 if current_player == game.players else -1
+            #
+            # if game.board.made_koks(current_player.checker_type):
+            #     V_next *= 3
+            # elif game.board.made_mars(current_player.checker_type):
+            #     V_next *= 2
+            #
+            # V_next = 1 if current_player == game.players[0] else 0
 
-            is_opp = True
+            x = self.extract_features(game.board)
 
             while game.board.status is None:
                 current_player = next(game.players_steps)
-                with game.board.reverse(fake=not is_opp) as board:
+                with game.board.reverse(fake=(current_player == player)) as board:
                     game.make_step(player=current_player, board=board)
-                    x_next = self.extract_features(game.board)
-                    V_next = self.get_output(x_next)
+
+                x_next = self.extract_features(game.board)
+                V_next = self.get_output(x_next)
 
                 self.sess.run(self.train_op, feed_dict={self.x: x, self.V_next: V_next})
                 x = x_next
                 game_step += 1
 
             V_next = game.board.status
+            if current_player != player:
+                V_next *= -1
 
             _, global_step, summaries, _ = self.sess.run([
                 self.train_op,
@@ -293,7 +330,7 @@ class Model:
 
             summary_writer.add_summary(summaries, global_step=global_step)
             winner = 'X' if current_player == players[0] else 'O'
-            print(f"Game {episode}/{episodes} (Winner: {winner}) in {game_step} turns")
+            # print(f"Game {episode}/{episodes} (Winner: {winner}) in {game_step} turns")
 
             if (episode + 1) % validation_interval == 0:
                 self.saver.save(self.sess, os.path.join(self.checkpoint_path, 'checkpoint'), global_step=global_step)
@@ -302,29 +339,3 @@ class Model:
         summary_writer.close()
 
         self.test(episodes=1000)
-
-
-class Model2(Model):
-    LAYER_SIZE_INPUT = 50
-    LAYER_SIZE_HIDDEN = 25
-
-    @classmethod
-    def extract_features(self, board: bg.Board) -> List[List[float]]:
-        """Create feature to insert in model."""
-        def _get_features(opponent: bool=False) -> List[float]:
-            positions_with_count = {
-                pos: len(board.cols[pos])
-                for pos in board.get_occupied_positions(opponent)
-            }
-            outed_checkers_percent = sum(positions_with_count.values()) / board.NUM_CHECKERS
-
-            _features = [0 for _ in range(board.NUM_COLS)]
-
-            for pos, count in positions_with_count.items():
-                _features[pos] = count/board.NUM_CHECKERS
-
-            return _features + [outed_checkers_percent]
-
-
-        features = _get_features() + _get_features(opponent=True)
-        return np.array(features).reshape(1, -1)

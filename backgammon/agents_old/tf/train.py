@@ -1,4 +1,5 @@
 import os
+import pathlib
 import time
 
 import tensorflow as tf
@@ -6,10 +7,9 @@ import tensorflow as tf
 from backgammon.agents_old.tf.model import Model
 
 
-
-path = os.path.join(
-    '/home/borsden/Projects/russian_backgammon/models/tf',
-    f'{str(int(time.time()))}_720_input_with_mars_and_koks'
+path = (
+    pathlib.Path('/home/borsden/Projects/russian_backgammon/models/tf') /
+    f'{str(int(time.time()))}_720_input'
 )
 
 
